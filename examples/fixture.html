@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Traceframe fixture</title>
+    <style>
+      @font-face {
+        font-family: Inter;
+        src: url('fonts/inter-variable.woff2') format('woff2');
+        font-weight: 100 900;
+        font-display: block;
+      }
+
+      :root {
+        color-scheme: light;
+        --accent: oklch(67% 0.21 34.635);
+        --accent-hover: color-mix(in srgb, oklch(15% 0 0) 10%, var(--accent));
+        --success: light-dark(oklch(52.7% 0.154 150.069), oklch(62.7% 0.194 149.214));
+        --bg: light-dark(#fff, oklch(20% 0 0));
+        --bg-subtle: light-dark(oklch(98% 0 0), oklch(24% 0 0));
+        --bg-hover: light-dark(oklch(95% 0 0), oklch(30% 0 0));
+        --plain-hover: light-dark(oklch(95% 0 0), color-mix(in oklab, #fff 10%, transparent));
+        --overlay: color-mix(in oklab, #000 50%, transparent);
+        --text: light-dark(oklch(15% 0 0), #fff);
+        --text-muted: light-dark(oklch(45% 0 0), oklch(72% 0 0));
+        --text-soft: light-dark(oklch(35% 0 0), oklch(85% 0 0));
+        --icon-muted: light-dark(oklch(55% 0 0), oklch(65% 0 0));
+        --border: light-dark(color-mix(in oklab, oklch(15% 0 0) 10%, transparent), color-mix(in oklab, #fff 12%, transparent));
+        --divider: light-dark(color-mix(in oklab, oklch(15% 0 0) 5%, transparent), color-mix(in oklab, #fff 8%, transparent));
+        --shine: linear-gradient(color-mix(in oklab, #fff 10%, transparent), transparent);
+
+        --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        --shadow-popover: var(--shadow-lg), 0 0 0 1px var(--border);
+        --shadow-dialog: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1), 0 0 0 1px var(--border);
+
+        --ease-in-cubic: cubic-bezier(0.55, 0.055, 0.675, 0.19);
+        --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+        --ease-out-quint: cubic-bezier(0.23, 1, 0.32, 1);
+        --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
+      }
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      button { border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+      ul { list-style: none; }
+      svg { display: block; }
+      .icon { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+      [hidden] { display: none !important; }
+
+      body {
+        display: grid;
+        grid-template-columns: 240px 1fr;
+        min-height: 100vh;
+        background-color: var(--bg);
+        color: var(--text);
+        font: 16px/1.5 Inter, system-ui, sans-serif;
+        font-feature-settings: 'liga' 1, 'calt' 1;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      :root[data-theme='dark'] { color-scheme: dark; }
+      :root[data-theme='system'] { color-scheme: light dark; }
+      .inverted { color-scheme: dark; }
+      :root[data-theme='dark'] .inverted { color-scheme: light; }
+
+      /* Buttons */
+      .button { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; gap: 8px; min-height: 32px; padding: 8px 16px; border-radius: 9999px; font-weight: 500; font-size: 0.875rem; line-height: 1.25rem; white-space: nowrap; transition: background-color 120ms var(--ease-out-quint), scale 150ms var(--ease-out-quad); }
+      .button:active:not(:disabled) { scale: 0.97; }
+      .button-primary { background-color: var(--accent); background-image: var(--shine); color: #fff; }
+      .button-primary:hover:not(:disabled) { background-color: var(--accent-hover); }
+      .button-success { background-color: var(--success); background-image: var(--shine); color: #fff; }
+      .button-plain { color: var(--text-soft); }
+      .button-plain:hover:not(:disabled) { background-color: var(--plain-hover); }
+
+      /* Sidebar */
+      .sidebar { display: flex; flex-direction: column; gap: 16px; padding: 16px; background-color: var(--bg-subtle); }
+      .wordmark { display: flex; align-items: center; gap: 10px; padding: 8px; font-size: 17px; font-weight: 700; letter-spacing: -0.03em; }
+      .wordmark::before { width: 18px; height: 18px; border: 2px solid currentColor; border-radius: 5px; background: radial-gradient(circle, var(--accent) 3px, transparent 3.5px); content: ''; }
+      .nav-link { display: flex; min-height: 32px; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 8px; color: var(--text-soft); font-size: 0.875rem; line-height: 1.25rem; font-weight: 500; text-decoration: none; }
+      .nav-link:hover, .nav-link[aria-current='page'] { background-color: var(--bg-hover); }
+      .nav-link[aria-current='page'] { color: var(--text); }
+      .nav-link svg { width: 20px; height: 20px; }
+      .sidebar li + li { margin-block-start: 2px; }
+
+      /* Page */
+      main { width: 100%; max-width: 760px; padding: 72px 64px; }
+      .page-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-block-end: 40px; }
+      h1 { font-size: 1.5rem; line-height: 2rem; font-weight: 500; letter-spacing: -0.02em; }
+      .page-header p { margin-block-start: 4px; color: var(--text-muted); font-size: 0.875rem; line-height: 1.25rem; }
+      section + section { margin-block-start: 32px; }
+      .settings-label { margin-block-end: 8px; padding-inline: 8px; color: var(--text-muted); font-size: 0.875rem; line-height: 1.25rem; font-weight: 400; }
+      .settings-group { overflow: hidden; border-radius: 8px; background-color: var(--bg-subtle); }
+      .settings-row { display: flex; min-height: 52px; align-items: center; gap: 12px; padding: 10px 14px; font-size: 0.875rem; line-height: 1.25rem; }
+      .settings-row + .settings-row { border-block-start: 1px solid var(--divider); }
+      .settings-row > :first-child { flex: 1; }
+      .settings-value, .settings-description { color: var(--text-muted); }
+
+      /* Dialog */
+      .backdrop { position: fixed; inset: 0; background-color: var(--overlay); transition: opacity 200ms var(--ease-out-expo); }
+      .backdrop[data-starting-style], .backdrop[data-ending-style] { opacity: 0; }
+      .popup-transition { transition-property: opacity, scale; transition-duration: 200ms; transition-timing-function: var(--ease-out-expo); }
+      .popup-transition[data-starting-style], .popup-transition[data-ending-style] { opacity: 0; scale: 0.95; }
+      .popup-transition[data-ending-style] { transition-duration: 140ms; }
+      .overlay-viewport { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; }
+      .popup { position: relative; display: flex; width: 100%; max-width: 920px; height: 640px; overflow: hidden; border-radius: 8px; background-color: var(--bg); box-shadow: var(--shadow-dialog); font-size: 0.875rem; line-height: 1.25rem; }
+      .overlay-close { position: absolute; top: 12px; right: 12px; display: flex; width: 32px; height: 32px; align-items: center; justify-content: center; border-radius: 9999px; }
+      .overlay-close:hover { background-color: var(--bg-hover); }
+      .overlay-close svg { width: 20px; height: 20px; }
+      .panel-tabs { display: flex; width: 192px; flex-shrink: 0; flex-direction: column; gap: 2px; padding: 16px; background-color: var(--bg-subtle); }
+      .panel-tab { display: flex; width: 100%; min-height: 32px; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 8px; color: var(--text-soft); font-weight: 500; }
+      .panel-tab:hover, .panel-tab[aria-selected='true'] { background-color: var(--bg-hover); }
+      .panel-tab[aria-selected='true'] { color: var(--text); }
+      .panel-tab svg { width: 20px; height: 20px; }
+      .dialog-main { display: flex; min-width: 0; flex: 1; flex-direction: column; border-inline-start: 1px solid var(--divider); }
+      .dialog-title { padding: 32px 56px 32px 40px; font-size: 1.25rem; line-height: 1.75rem; font-weight: 500; }
+      .dialog-panel { flex: 1; padding: 0 32px 40px; }
+
+      /* Select */
+      .field { min-height: 32px; padding: 7px 12px; border: 1px solid var(--border); border-radius: 8px; background-color: var(--bg); color: var(--text); font-size: 0.875rem; line-height: 1.25rem; }
+      .select-trigger { display: flex; width: 176px; align-items: center; justify-content: space-between; gap: 8px; text-align: left; }
+      .select-trigger svg, .select-item svg { width: 16px; height: 16px; flex-shrink: 0; }
+      .select-trigger svg { color: var(--icon-muted); }
+      .select-positioner { position: fixed; z-index: 10; }
+      .select-popup { padding: 4px; border-radius: 8px; background-color: var(--bg); box-shadow: var(--shadow-popover); font-size: 0.875rem; line-height: 1.25rem; transform-origin: center top; }
+      .select-item { display: flex; min-height: 32px; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-radius: 4px; cursor: default; }
+      .select-item[data-highlighted] { background-color: var(--bg-hover); }
+      .select-item[aria-selected='false'] svg { visibility: hidden; }
+
+      /* Save bar */
+      .save-bar { position: absolute; inset-block-end: 24px; inset-inline: 0; display: flex; width: fit-content; align-items: center; gap: 48px; margin-inline: auto; padding: 6px 6px 6px 24px; border-radius: 9999px; background-color: var(--bg); color: var(--text); box-shadow: var(--shadow-lg); transition: translate 400ms var(--ease-out-quint), opacity 200ms var(--ease-out-quint); }
+      .save-bar[data-starting-style], .save-bar[data-ending-style] { opacity: 0; translate: 0 calc(100% + 24px); }
+      .save-bar[data-ending-style] { transition: translate 250ms var(--ease-in-cubic), opacity 250ms var(--ease-in-cubic); }
+      .save-bar .actions { display: flex; gap: 8px; }
+      .discard { transition: opacity 150ms var(--ease-out-expo), background-color 120ms var(--ease-out-quint); }
+      .save-bar:not([data-state='idle']) .discard { opacity: 0; pointer-events: none; }
+      .swap { display: grid; place-items: center; }
+      .swap > * { display: inline-flex; grid-area: 1 / 1; align-items: center; gap: 6px; opacity: 0; filter: blur(4px); transition: opacity 160ms, filter 160ms; }
+      .swap > * svg { width: 16px; height: 16px; }
+      .message { justify-items: start; white-space: nowrap; }
+      .save-bar[data-state='idle'] [data-for~='idle'], .save-bar[data-state='saving'] [data-for~='saving'], .save-bar[data-state='saved'] [data-for~='saved'] { opacity: 1; filter: blur(0); }
+      .spinner { box-sizing: border-box; width: 16px; height: 16px; border: 1.5px solid color-mix(in oklab, currentColor 30%, transparent); border-top-color: currentColor; border-radius: 50%; animation: spin 1s linear infinite; }
+      @keyframes spin { to { rotate: 360deg; } }
+    </style>
+  </head>
+  <body>
+    <svg hidden>
+      <symbol id="square" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/></symbol>
+      <symbol id="circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></symbol>
+      <symbol id="triangle" viewBox="0 0 24 24"><path d="M12 4.5 20 19H4Z"/></symbol>
+      <symbol id="chevron" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+      <symbol id="check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7"/></symbol>
+      <symbol id="close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    </svg>
+
+    <aside class="sidebar">
+      <div class="wordmark">traceframe</div>
+      <nav aria-label="Main">
+        <ul>
+          <li>
+            <a class="nav-link" href="#" aria-current="page">
+              <svg class="icon" aria-hidden="true"><use href="#square"/></svg>
+              Workspace
+            </a>
+          </li>
+          <li>
+            <a class="nav-link" href="#">
+              <svg class="icon" aria-hidden="true"><use href="#circle"/></svg>
+              Members
+            </a>
+          </li>
+          <li>
+            <a class="nav-link" href="#">
+              <svg class="icon" aria-hidden="true"><use href="#triangle"/></svg>
+              Billing
+            </a>
+          </li>
+        </ul>
+      </nav>
+    </aside>
+
+    <main>
+      <header class="page-header">
+        <div>
+          <h1>Example workspace</h1>
+          <p>Shared settings for everyone on your team.</p>
+        </div>
+        <button id="open" class="button button-primary" type="button">Open settings</button>
+      </header>
+      <section aria-labelledby="appearance-label">
+        <h2 id="appearance-label" class="settings-label">Appearance</h2>
+        <dl class="settings-group">
+          <div class="settings-row">
+            <dt>Theme</dt>
+            <dd id="current-theme" class="settings-value">Light</dd>
+          </div>
+          <div class="settings-row">
+            <dt>Font</dt>
+            <dd class="settings-value">Inter</dd>
+          </div>
+        </dl>
+      </section>
+      <section aria-labelledby="team-label">
+        <h2 id="team-label" class="settings-label">Team</h2>
+        <dl class="settings-group">
+          <div class="settings-row">
+            <dt>Members</dt>
+            <dd class="settings-value">3 people</dd>
+          </div>
+        </dl>
+      </section>
+    </main>
+
+    <div id="settings" hidden>
+      <div class="backdrop"></div>
+      <div class="overlay-viewport">
+        <div class="popup popup-transition" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+          <div class="panel-tabs" role="tablist" aria-label="Workspace settings">
+            <button class="panel-tab" role="tab" aria-selected="true" type="button">
+              <svg class="icon" aria-hidden="true"><use href="#square"/></svg>
+              General
+            </button>
+            <button class="panel-tab" role="tab" aria-selected="false" type="button">
+              <svg class="icon" aria-hidden="true"><use href="#circle"/></svg>
+              Members
+            </button>
+            <button class="panel-tab" role="tab" aria-selected="false" type="button">
+              <svg class="icon" aria-hidden="true"><use href="#triangle"/></svg>
+              Billing
+            </button>
+          </div>
+          <div class="dialog-main">
+            <h2 id="dialog-title" class="dialog-title">General</h2>
+            <div class="dialog-panel">
+              <h3 class="settings-label">Appearance</h3>
+              <div class="settings-group">
+                <div class="settings-row">
+                  <div>
+                    <p id="theme-label">Theme</p>
+                    <p class="settings-description">Choose how the workspace looks.</p>
+                  </div>
+                  <button id="theme" class="field select-trigger" role="combobox" aria-labelledby="theme-label" aria-controls="theme-options" aria-expanded="false" type="button">
+                    <span id="theme-value">Light</span>
+                    <svg class="icon" aria-hidden="true"><use href="#chevron"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div id="save-bar" class="save-bar inverted" role="status" data-state="idle" hidden>
+              <span class="swap message">
+                <span data-for="idle saving">1 unsaved change</span>
+                <span data-for="saved">Settings saved</span>
+              </span>
+              <div class="actions">
+                <button id="discard" class="discard button button-plain" type="button">Discard</button>
+                <button id="save" class="button button-primary" type="button" aria-label="Save">
+                  <span class="swap">
+                    <span data-for="idle">Save</span>
+                    <span data-for="saving"><span class="spinner" aria-hidden="true"></span></span>
+                    <span data-for="saved"><svg class="icon" aria-hidden="true"><use href="#check"/></svg>Saved</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <button id="close" class="overlay-close" type="button" aria-label="Close settings">
+            <svg class="icon" aria-hidden="true"><use href="#close"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="theme-positioner" class="select-positioner" hidden>
+      <ul id="theme-options" class="select-popup popup-transition" role="listbox" aria-labelledby="theme-label">
+        <li class="select-item" role="option" aria-selected="true">Light<svg class="icon" aria-hidden="true"><use href="#check"/></svg></li>
+        <li class="select-item" role="option" aria-selected="false">Dark<svg class="icon" aria-hidden="true"><use href="#check"/></svg></li>
+        <li class="select-item" role="option" aria-selected="false">System<svg class="icon" aria-hidden="true"><use href="#check"/></svg></li>
+      </ul>
+    </div>
+
+    <script>
+      // Popups get these attributes while they open and close; the CSS animates them.
+      function show(root, part = root) {
+        root.hidden = false
+        part.setAttribute('data-starting-style', '')
+        requestAnimationFrame(() => requestAnimationFrame(() => part.removeAttribute('data-starting-style')))
+      }
+
+      async function hide(root, ...parts) {
+        parts.forEach((part) => part.setAttribute('data-ending-style', ''))
+        await Promise.all(parts.flatMap((part) => part.getAnimations()).map((animation) => animation.finished))
+        root.hidden = true
+        parts.forEach((part) => part.removeAttribute('data-ending-style'))
+      }
+
+      const settings = document.querySelector('#settings')
+      const backdrop = settings.querySelector('.backdrop')
+      const dialog = settings.querySelector('[role="dialog"]')
+      const theme = document.querySelector('#theme')
+      const positioner = document.querySelector('#theme-positioner')
+      const options = document.querySelector('#theme-options')
+      const saveBar = document.querySelector('#save-bar')
+      const save = document.querySelector('#save')
+      let savedTheme = 'Light'
+      let selectedTheme = 'Light'
+
+      document.querySelector('#open').addEventListener('click', () => {
+        show(settings, backdrop)
+        show(settings, dialog)
+      })
+      document.querySelector('#close').addEventListener('click', () => hide(settings, backdrop, dialog))
+
+      theme.addEventListener('click', () => {
+        if (!positioner.hidden) return closeSelect()
+        const box = theme.getBoundingClientRect()
+        Object.assign(positioner.style, { top: `${box.bottom + 4}px`, left: `${box.left}px`, width: `${box.width}px` })
+        theme.setAttribute('aria-expanded', 'true')
+        show(positioner, options)
+      })
+
+      function closeSelect() {
+        theme.setAttribute('aria-expanded', 'false')
+        options.querySelectorAll('[data-highlighted]').forEach((item) => item.removeAttribute('data-highlighted'))
+        return hide(positioner, options)
+      }
+
+      options.addEventListener('pointermove', (event) => {
+        const item = event.target.closest('[role="option"]')
+        options.querySelectorAll('[role="option"]').forEach((option) => option.toggleAttribute('data-highlighted', option === item))
+      })
+      options.addEventListener('click', (event) => {
+        const item = event.target.closest('[role="option"]')
+        if (!item) return
+        selectTheme(item.textContent.trim())
+        closeSelect()
+      })
+
+      function selectTheme(value) {
+        selectedTheme = value
+        document.querySelector('#theme-value').textContent = value
+        options.querySelectorAll('[role="option"]').forEach((option) => option.setAttribute('aria-selected', String(option.textContent.trim() === value)))
+        if (value !== savedTheme && saveBar.hidden) show(saveBar)
+        if (value === savedTheme && !saveBar.hidden) hide(saveBar, saveBar)
+      }
+
+      document.querySelector('#discard').addEventListener('click', () => selectTheme(savedTheme))
+
+      function setSaveState(state) {
+        saveBar.dataset.state = state
+        save.classList.toggle('button-primary', state !== 'saved')
+        save.classList.toggle('button-success', state === 'saved')
+        save.setAttribute('aria-label', { idle: 'Save', saving: 'Saving', saved: 'Saved' }[state])
+      }
+
+      save.addEventListener('click', () => {
+        if (saveBar.dataset.state !== 'idle') return
+        setSaveState('saving')
+        setTimeout(() => {
+          savedTheme = selectedTheme
+          document.documentElement.dataset.theme = savedTheme.toLowerCase()
+          document.querySelector('#current-theme').textContent = savedTheme
+          setSaveState('saved')
+          setTimeout(async () => {
+            await hide(saveBar, saveBar)
+            setSaveState('idle')
+          }, 2000)
+        }, 700)
+      })
+    </script>
+  </body>
+</html>
