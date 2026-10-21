@@ -14,7 +14,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "build:assets": "node scripts/build-assets.mjs"
   },
   "dependencies": {
     "playwright": "1.64.1"
