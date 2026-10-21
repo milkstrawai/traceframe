@@ -7,6 +7,9 @@
     "url": "git+https://github.com/milkstrawai/traceframe.git"
   },
   "type": "module",
+  "exports": {
+    ".": "./src/index.mjs"
+  },
   "files": [
     "src"
   ],
