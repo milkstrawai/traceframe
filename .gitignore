@@ -1,0 +1,8 @@
+node_modules/
+*.webm
+*.mp4
+.traceframe/
+.auth/
+.DS_Store
+
+!examples/sample-output.mp4

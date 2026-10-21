@@ -1,0 +1,23 @@
+{
+  "name": "traceframe",
+  "version": "0.1.0",
+  "description": "Record scripted browser flows and render smooth cursor overlays into video.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/milkstrawai/traceframe.git"
+  },
+  "type": "module",
+  "files": [
+    "src"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "playwright": "1.64.1"
+  },
+  "license": "MIT"
+}
