@@ -1,11 +1,21 @@
 {
-  "name": "traceframe",
+  "name": "@milkstraw/traceframe",
   "version": "0.1.0",
   "description": "Record scripted browser flows and render smooth cursor overlays into video.",
+  "keywords": [
+    "playwright",
+    "screen-recording",
+    "video",
+    "demo",
+    "cursor",
+    "browser-automation"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/milkstrawai/traceframe.git"
   },
+  "homepage": "https://github.com/milkstrawai/traceframe#readme",
+  "bugs": "https://github.com/milkstrawai/traceframe/issues",
   "type": "module",
   "bin": {
     "traceframe": "src/cli.mjs"
@@ -28,5 +38,8 @@
   "dependencies": {
     "playwright": "1.64.1"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
 }

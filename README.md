@@ -2,15 +2,13 @@
 
 Traceframe records a scripted Chromium flow and renders an MP4 with a smooth cursor and click pulse. Everything runs locally: pages, flows, videos, and authentication state stay on your machine.
 
+https://github.com/user-attachments/assets/38e02cd5-a9ba-4f3c-938c-159955353141
+
 ## Install
 
-Traceframe is not published to npm yet. Install it from GitHub:
-
 ```sh
-npm install github:milkstrawai/traceframe
+npm install @milkstraw/traceframe
 ```
-
-npm 12 and newer refuse Git dependencies by default. Add `--allow-git=root` to the command, or put `allow-git=root` in your project's `.npmrc` so later installs work too.
 
 Traceframe requires Node.js 22+, FFmpeg 5+ with `libx264` and `ffprobe` (for example, `brew install ffmpeg` or `sudo apt install ffmpeg`), and Playwright's Chromium:
 
@@ -83,7 +81,7 @@ The default function receives `page`, `signal`, and four helpers: `move({ x, y }
 ## Programmatic usage
 
 ```js
-import { record } from 'traceframe'
+import { record } from '@milkstraw/traceframe'
 
 await record({
   url: 'http://localhost:3000',

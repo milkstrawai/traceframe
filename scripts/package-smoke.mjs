@@ -19,7 +19,7 @@ try {
   const bin = join(directory, 'node_modules', '.bin', 'traceframe')
   const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
   assert.equal((await run(bin, ['--version'])).stdout, `${version}\n`)
-  assert.equal((await run(process.execPath, ['--input-type=module', '-e', 'const { record } = await import("traceframe"); console.log(typeof record)'], { cwd: directory })).stdout, 'function\n')
+  assert.equal((await run(process.execPath, ['--input-type=module', '-e', 'const { record } = await import("@milkstraw/traceframe"); console.log(typeof record)'], { cwd: directory })).stdout, 'function\n')
 
   const { stdout } = await run(bin, [
     'record', '--preset', 'draft',
