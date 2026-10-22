@@ -4,11 +4,7 @@ Traceframe records a scripted Chromium flow and renders an MP4 with a smooth cur
 
 https://github.com/user-attachments/assets/38e02cd5-a9ba-4f3c-938c-159955353141
 
-## Install
-
-```sh
-npm install @milkstraw/traceframe
-```
+## Prerequisites
 
 Traceframe requires Node.js 22+, FFmpeg 5+ with `libx264` and `ffprobe` (for example, `brew install ffmpeg` or `sudo apt install ffmpeg`), and Playwright's Chromium:
 
@@ -22,6 +18,22 @@ To record pages behind a login, pass a Playwright storage-state file with `--sto
 
 ## Record a video
 
+Run Traceframe with `npx` without adding it to your project's dependencies. Pass your application URL and your own flow file:
+
+```sh
+npx @milkstraw/traceframe record \
+  --url http://localhost:3000 \
+  --flow ./flow.mjs \
+  --out ./recording.mp4
+```
+
+For regular use, you can install the command globally:
+
+```sh
+npm install -g @milkstraw/traceframe
+traceframe record --url http://localhost:3000 --flow ./flow.mjs --out ./recording.mp4
+```
+
 The included fixture is available in a repository clone. It is not included in the installed package.
 
 ```sh
@@ -33,15 +45,6 @@ npx traceframe record \
   --flow ./examples/fixture-flow.mjs \
   --out ./sample.mp4 \
   --preset draft
-```
-
-For an installed package, pass your application URL and your own flow file:
-
-```sh
-npx traceframe record \
-  --url http://localhost:3000 \
-  --flow ./flow.mjs \
-  --out ./recording.mp4
 ```
 
 The `draft` preset uses a 1280×800 CSS viewport and produces 1280×800 at 30 FPS. The `standard` preset uses the same CSS viewport and encodes it at 2560×1600 at 60 FPS. The cursor and click pulses are always drawn at the full frame rate, but Chromium may capture page changes, such as scrolling and animations, at a lower rate at 2560×1600, depending on the machine. When that happens, the video repeats the last page frame until the next one arrives. The video is always the viewport size times `--scale`, so `--preset draft --scale 2` gives 2560×1600 at 30 FPS. The command prints a JSON summary when it finishes.
@@ -79,6 +82,12 @@ The default function receives `page`, `signal`, and four helpers: `move({ x, y }
 `click` and `hover` use real Playwright mouse events and add their movement to the overlay timeline. If the pointer is already inside the target, it stays where it is, so a hover effect that moves or resizes the target does not pull the cursor along. A click holds the mouse button for about 100 ms, as a person would, so press styles such as `:active` show in the video. Headless Chromium draws pages without a GPU, so on heavy pages, such as ones with blurred backgrounds, hover effects can appear a little after the cursor passes. A longer `duration`, or a `move` around hover-reactive elements, keeps this from showing. Typing, scrolling, dragging, multiple tabs, and direct `page.mouse` or `locator.click()` calls are not currently represented in that timeline. A flow receives an `AbortSignal`; helper calls stop promptly when the duration limit is reached.
 
 ## Programmatic usage
+
+To call Traceframe from JavaScript, install it in your project:
+
+```sh
+npm install @milkstraw/traceframe
+```
 
 ```js
 import { record } from '@milkstraw/traceframe'
