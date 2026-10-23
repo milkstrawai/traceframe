@@ -27,9 +27,10 @@ test('sizes the video as the viewport times the scale', () => {
   assert.deepEqual(config.video, { width: 2560, height: 1600, fps: 30 })
 })
 
-test('rejects unsupported frame rates and negative post-roll lengths', () => {
+test('rejects unsupported frame rates, negative post-roll lengths, and zero flow timeouts', () => {
   assert.throws(() => createConfig({ ...base, fps: 24 }), /FPS must be 30 or 60/)
   assert.throws(() => createConfig({ ...base, postRoll: -1 }), /Post-roll must be 0 or more seconds/)
+  assert.throws(() => createConfig({ ...base, flowTimeout: 0 }), /Flow timeout must be more than 0 seconds/)
 })
 
 test('rejects preset names that are not presets', () => {
@@ -39,4 +40,5 @@ test('rejects preset names that are not presets', () => {
 test('accepts numbers only', () => {
   assert.throws(() => createConfig({ ...base, scale: '2' }), /Scale must be 1 or 2/)
   assert.throws(() => createConfig({ ...base, fps: '60' }), /FPS must be 30 or 60/)
+  assert.throws(() => createConfig({ ...base, flowTimeout: '300' }), /Flow timeout must be more than 0 seconds/)
 })

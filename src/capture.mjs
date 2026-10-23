@@ -4,7 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { chromium } from 'playwright'
 
 import { TraceframeError } from './errors.mjs'
-import { createFlowApi, LIMITS } from './flow.mjs'
+import { createFlowApi } from './flow.mjs'
 
 const PLAYWRIGHT_DEFAULT_TIMEOUT = 30_000
 const FIRST_FRAME_TIMEOUT = 10_000
@@ -32,8 +32,8 @@ export async function captureFlow({ config, flow, directory, signal: callerSigna
     )
     await withDeadline(
       (flowSignal) => flow.run({ page, signal: flowSignal, ...createFlowApi({ page, trace, clock, viewport: config.viewport, signal: flowSignal }) }),
-      LIMITS.maxDuration * 1000,
-      new TraceframeError(`Flow exceeded the ${LIMITS.maxDuration}-second duration limit.`, { code: 'FLOW_TOO_LONG' }),
+      config.flowTimeout * 1000,
+      new TraceframeError(`Flow exceeded the ${config.flowTimeout}-second flow timeout. Raise it with the flowTimeout option, or --flow-timeout.`, { code: 'FLOW_TOO_LONG' }),
       signal,
     )
     trace.end = (Date.now() - clock) / 1000

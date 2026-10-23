@@ -36,6 +36,8 @@ export function createConfig(options = {}) {
   check(Number.isFinite(postRoll) && postRoll >= 0, 'Post-roll must be 0 or more seconds.')
   const readyTimeout = options.readyTimeout ?? 30
   check(Number.isFinite(readyTimeout) && readyTimeout > 0, 'Ready timeout must be more than 0 seconds.')
+  const flowTimeout = options.flowTimeout ?? 120
+  check(Number.isFinite(flowTimeout) && flowTimeout > 0, 'Flow timeout must be more than 0 seconds.')
 
   return {
     url: options.url,
@@ -48,6 +50,7 @@ export function createConfig(options = {}) {
     scale,
     postRoll,
     readyTimeout,
+    flowTimeout,
     runDirectory: options.runDirectory ? resolve(options.runDirectory) : undefined,
   }
 }

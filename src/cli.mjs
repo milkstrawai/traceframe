@@ -21,9 +21,10 @@ const OPTION_KEYS = {
   fps: 'fps',
   'post-roll': 'postRoll',
   'ready-timeout': 'readyTimeout',
+  'flow-timeout': 'flowTimeout',
   'run-dir': 'runDirectory',
 }
-const NUMBER_KEYS = new Set(['viewportWidth', 'viewportHeight', 'scale', 'fps', 'postRoll', 'readyTimeout'])
+const NUMBER_KEYS = new Set(['viewportWidth', 'viewportHeight', 'scale', 'fps', 'postRoll', 'readyTimeout', 'flowTimeout'])
 const HELP = `traceframe ${VERSION}
 
 Record a scripted Chromium flow and render a smooth cursor and click pulse.
@@ -42,6 +43,7 @@ Options:
   --fps <30|60>                Encoded frame rate
   --post-roll <seconds>        Tail after the flow (default: 0.3)
   --ready-timeout <seconds>    Playwright timeout for the page load and calls in ready() (default: 30)
+  --flow-timeout <seconds>     Time limit for the flow, including waits (default: 120)
   --run-dir <path>             Keep the raw capture and FFmpeg filter in this directory
   -h, --help                   Show this help
   -v, --version                Show the version
@@ -50,7 +52,7 @@ The flow module must export a default function. It may also export
 ready({ page, signal }) to establish state before capture and initialPointer
 { x, y } to set where the cursor starts.
 The flow helpers are move(), hover(), click(), and wait(). A flow may contain
-at most ${LIMITS.maxMoves} move events, ${LIMITS.maxClicks} click events, and ${LIMITS.maxDuration} seconds of work.
+at most ${LIMITS.maxMoves} move events and ${LIMITS.maxClicks} click events.
 Each duration, dwell, and wait is at most ${LIMITS.maxActionDuration} seconds.
 `
 

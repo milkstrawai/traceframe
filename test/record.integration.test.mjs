@@ -54,6 +54,25 @@ test('an already aborted signal stops before the flow file is loaded', async () 
   })
 })
 
+test('the flow timeout stops a flow that ignores its signal and removes temporary files', { timeout: 30_000 }, async () => {
+  await withRecording('export default async () => { await new Promise(() => {}) }', async ({ options, temp, outputDirectory }) => {
+    await assert.rejects(record({ ...options, preset: 'draft', flowTimeout: 0.2, signal: AbortSignal.timeout(10_000) }), {
+      code: 'FLOW_TOO_LONG', message: /^Flow exceeded the 0\.2-second flow timeout\./,
+    })
+    assert.deepEqual(await readdir(temp), [])
+    assert.deepEqual(await readdir(outputDirectory), [])
+  })
+})
+
+test('the flow timeout excludes preparation and post-roll', { timeout: 30_000 }, async () => {
+  const flow = `export async function ready() { await new Promise((resolve) => setTimeout(resolve, 700)) }
+export default async ({ wait }) => { await wait(0.1) }`
+  await withRecording(flow, async ({ options }) => {
+    const summary = await record({ ...options, preset: 'draft', flowTimeout: 0.5, postRoll: 0.7 })
+    assert.ok(summary.duration >= 0.8)
+  })
+})
+
 test('aborting during the flow stops a pending wait and removes temporary files', { timeout: 60_000 }, async () => {
   const flow = `${markStarted}export default async ({ page }) => { markStarted(); await page.getByRole('button', { name: 'Never' }).waitFor() }\n`
   await withRecording(flow, async ({ options, fixtures, temp, outputDirectory }) => {

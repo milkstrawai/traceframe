@@ -31,4 +31,6 @@ test('passes --out and numeric options through to the configuration', async () =
   assert.match((await run('record', ...flowArgs, '--out', 'video.webm')).stderr, /Output path must use the \.mp4 extension/)
   assert.match((await run('record', ...flowArgs, '--fps', '45')).stderr, /FPS must be 30 or 60/)
   assert.match((await run('record', ...flowArgs, '--post-roll=-1')).stderr, /Post-roll must be 0 or more seconds/)
+  // A string timeout would fail the config check, so reaching the flow loader proves the number conversion.
+  assert.match((await run('record', '--url', 'file:///tmp/page.html', '--flow', 'missing-flow.mjs', '--flow-timeout', '300')).stderr, /Could not load flow/)
 })

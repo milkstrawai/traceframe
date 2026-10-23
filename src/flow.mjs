@@ -4,7 +4,6 @@ import { pathToFileURL } from 'node:url'
 import { TraceframeError } from './errors.mjs'
 
 export const LIMITS = {
-  maxDuration: 120,
   maxMoves: 100,
   maxClicks: 100,
   maxActionDuration: 30,
