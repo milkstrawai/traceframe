@@ -62,7 +62,7 @@ async function launchBrowser(config, { handleSignals }) {
     if (!/Executable doesn't exist/i.test(error.message)) throw error
     const message = config.browser
       ? `Configured browser executable is unavailable: ${config.browser}`
-      : 'Playwright Chromium is not installed. Run `npx playwright@1.64.1 install --only-shell chromium` or pass --browser to a Chrome executable.'
+      : 'Playwright Chromium is not installed. Run `npx playwright@1.64.1 install --only-shell chromium`, or pass --browser to a Chrome executable and run `npx playwright@1.64.1 install ffmpeg`.'
     throw new TraceframeError(message, { code: 'PLAYWRIGHT_RUNTIME_MISSING', cause: error })
   }
 }
