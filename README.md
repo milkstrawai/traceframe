@@ -6,13 +6,13 @@ https://github.com/user-attachments/assets/38e02cd5-a9ba-4f3c-938c-159955353141
 
 ## Prerequisites
 
-Traceframe requires Node.js 22+, FFmpeg 5+ with `libx264` and `ffprobe` (for example, `brew install ffmpeg` or `sudo apt install ffmpeg`), and Playwright's Chromium:
+Traceframe requires Node.js 22+, system FFmpeg 5+ with `libx264` and `ffprobe` (for example, `brew install ffmpeg` or `sudo apt install ffmpeg`), plus Playwright's Chromium and recording FFmpeg:
 
 ```sh
-npx playwright@1.64.1 install --only-shell chromium
+npx playwright@1.64.1 install --only-shell chromium ffmpeg
 ```
 
-To use a system Chrome instead, pass `--browser` or set `CHROME_PATH`. Playwright still needs its own FFmpeg build to record the page, so install it with `npx playwright@1.64.1 install ffmpeg`. Use Chrome 150 or later; with older versions, scrolling a target in a panel into view can fail.
+The Playwright version must match Traceframe's dependency; another cached browser version will not be used. To use a system Chrome instead, pass `--browser` or set `CHROME_PATH`, and install Playwright's recording FFmpeg with `npx playwright@1.64.1 install ffmpeg`. Use Chrome 150 or later; with older versions, scrolling a target in a panel into view can fail. System FFmpeg renders the finished MP4; it does not replace Playwright's recording binary. In a sandbox, such as a coding agent's, allow Playwright's browser download and let Chromium start.
 
 To record pages behind a login, pass a Playwright storage-state file with `--storage-state`. Keep it in `.auth/` or another ignored location.
 
@@ -34,22 +34,24 @@ npm install -g @milkstraw/traceframe
 traceframe record --url http://localhost:3000 --flow ./flow.mjs --out ./recording.mp4
 ```
 
-The included fixture is available in a repository clone. It is not included in the installed package.
+To check installation before touching your application, save this as `smoke.mjs`:
+
+```js
+export default async function ({ wait }) {
+  await wait(0.2)
+}
+```
 
 ```sh
-git clone https://github.com/milkstrawai/traceframe.git
-cd traceframe
-npm ci
-npx traceframe record \
-  --url "file://$PWD/examples/fixture.html" \
-  --flow ./examples/fixture-flow.mjs \
-  --out ./sample.mp4 \
+npx @milkstraw/traceframe record \
+  --url 'data:text/html,<h1>Traceframe smoke</h1>' \
+  --flow ./smoke.mjs --out ./smoke.mp4 \
   --preset draft
 ```
 
 The `draft` preset uses a 1280×800 CSS viewport and produces 1280×800 at 30 FPS. The `standard` preset uses the same CSS viewport and encodes it at 2560×1600 at 60 FPS. The cursor and click pulses are always drawn at the full frame rate, but Chromium may capture page changes, such as scrolling and animations, at a lower rate at 2560×1600, depending on the machine. When that happens, the video repeats the last page frame until the next one arrives. The video is always the viewport size times `--scale`, so `--preset draft --scale 2` gives 2560×1600 at 30 FPS. The command prints a JSON summary when it finishes.
 
-Use `--run-dir .traceframe/runs/name` (`runDirectory` in the API) to keep the raw capture and the FFmpeg filter file.
+Use `--run-dir .traceframe/runs/name` (`runDirectory` in the API) to keep the raw capture and the FFmpeg filter file. Keep that directory out of Git, because the raw capture shows everything the page showed. With this option, a flow that fails after recording starts keeps its partial raw capture for inspection; it has no rendered cursor overlay. Without this option, temporary captures are removed.
 
 ## Have an agent create the flow
 
@@ -75,13 +77,15 @@ export default async function ({ page, click, wait }) {
 }
 ```
 
-`ready({ page, signal })` runs before recording starts. `--ready-timeout` (30 seconds by default) is Playwright's timeout for the page load and for each Playwright call in `ready`; it does not limit other work in the hook. A flow can also export `initialPointer = { x, y }` to choose where the cursor starts. By default it starts near the lower left.
+`ready({ page, signal })` runs after initial navigation and before recording starts. `--ready-timeout` (30 seconds by default) is Playwright's timeout for the page load and for each Playwright call in `ready`; it does not limit other work in the hook. A flow can also export `initialPointer = { x, y }` to choose where the cursor starts. By default it starts near the lower left.
 
 The default function receives `page`, `signal`, and five helpers: `move({ x, y }, { duration })`, `hover(locator, { duration })`, `click(locator, { duration, dwell })`, `scroll(locator)`, and `wait(seconds)`. A move takes 0.5 seconds unless you pass `duration`, and a click rests on the target for 0.25 seconds (`dwell`) before it presses. If the target is disabled, the click waits for it to become enabled. `scroll` smoothly centers a target vertically through the page and its scrollable containers and waits until scrolling stops, without moving the pointer. Use it to show a result, reveal a target clipped by a scrollable panel, or move a target away from a sticky header before a click. It also centers targets that are already on screen. Centering cannot clear every cover, such as a sticky bar taller than half the viewport or scrolling panel, or reveal content hidden by `overflow: clip`. A flow may contain at most 100 moves and 100 clicks, and each `duration`, `dwell`, and `wait` is at most 30 seconds. Error messages name the locator; give it a clearer name with Playwright's `locator.describe('Save settings')`.
 
 The default function may run for 120 seconds, including waits for your backend. For longer flows, pass `--flow-timeout 300` (`flowTimeout: 300` in the API). This does not change Playwright's action timeouts.
 
-`click` and `hover` use real Playwright mouse events and add their movement to the overlay timeline. When the point they aim at is outside the viewport, they first scroll the target smoothly into view, including its scrollable containers and iframes, and wait until scrolling stops. For a point already inside the viewport, they do not scroll automatically, even if a panel clips it or something covers it. Use `scroll(target)` first for clipping by a scrollable panel or a sticky header; wait for a dialog or toast to close. `click` fails with `FLOW_TARGET_OBSCURED` if the target is still covered when it presses. If the pointer is already inside the target's box, it stays where it is, so a hover effect that moves or resizes the target does not pull the cursor along. A click holds the mouse button for about 100 ms, as a person would, so press styles such as `:active` show in the video. Headless Chromium draws pages without a GPU, so on heavy pages, such as ones with blurred backgrounds, hover effects can appear a little after the cursor passes. A longer `duration`, or a `move` around hover-reactive elements, keeps this from showing. Typing, scrolling, dragging, multiple tabs, and direct `page.mouse` or `locator.click()` calls are not currently represented in that timeline. A flow receives an `AbortSignal`; helper calls stop promptly when the flow timeout is reached.
+`click` and `hover` use real Playwright mouse events and add their movement to the overlay timeline. When the point they aim at is outside the viewport, they first scroll the target smoothly into view, including its scrollable containers and iframes, and wait until scrolling stops. For a point already inside the viewport, they do not scroll automatically, even if a panel clips it or something covers it. Use `scroll(target)` first for clipping by a scrollable panel or a sticky header; wait for a dialog or toast to close. `click` fails with `FLOW_TARGET_OBSCURED` if the target is still covered when it presses. If the pointer is already inside the target's box, it stays where it is, so a hover effect that moves or resizes the target does not pull the cursor along. A click holds the mouse button for about 100 ms, as a person would, so press styles such as `:active` show in the video. Headless Chromium draws pages without a GPU, so on heavy pages, such as ones with blurred backgrounds, hover effects can appear a little after the cursor passes. A longer `duration`, or a `move` around hover-reactive elements, keeps this from showing. A flow receives an `AbortSignal`; helper calls stop promptly when the flow timeout is reached.
+
+Playwright typing and scrolling appear in the captured page. Direct `page.mouse`, `locator.click()`, and dragging calls bypass Traceframe's cursor trace and click pulses, so use its pointer helpers for visible interactions. Only the starting page is recorded; new tabs and popups do not appear in the video.
 
 ## Programmatic usage
 
