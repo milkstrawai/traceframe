@@ -22,15 +22,15 @@ function setup() {
 // A target whose box depends on the phase: before the pointer moves, after it arrives, just before the click, and while pressed.
 function target(page, { start = box, arrived = start, beforeClick = arrived, pressed = beforeClick, enabledError, receivesPointer = true } = {}) {
   const element = {
-    async boundingBox() { return page.mouse.downAt === undefined ? beforeClick : pressed },
+    async boundingBox() { return page.mouse.downAt !== undefined ? pressed : page.mouse.moves.length ? beforeClick : start },
     async waitForElementState() { if (enabledError) throw enabledError },
-    async evaluate() { return receivesPointer },
+    // The hit test passes the point to check; aiming passes nothing.
+    async evaluate(_, point) { return point ? receivesPointer : { x: 0.5, y: 0.5 } },
     async ownerFrame() { return { parentFrame: () => null } },
   }
   return {
     async waitFor() {},
     async boundingBox() { return page.mouse.moves.length ? arrived : start },
-    async evaluate() { return { x: 0.5, y: 0.5 } },
     async elementHandle() { return element },
   }
 }
@@ -62,6 +62,11 @@ test('clicks where the pointer is when a hover effect shifts the target under it
 test('refuses a target that moves away while the pointer arrives', async () => {
   const { api, page } = setup()
   await assert.rejects(api.hover(target(page, { arrived: { ...box, x: 300 } }), { duration: 0.01 }), { code: 'FLOW_TARGET_MOVED' })
+})
+
+test('refuses a target that disappears while the pointer arrives', async () => {
+  const { api, page } = setup()
+  await assert.rejects(api.hover(target(page, { arrived: null }), { duration: 0.01 }), { code: 'FLOW_TARGET_MOVED' })
 })
 
 test('refuses a target that moves away before the click', async () => {

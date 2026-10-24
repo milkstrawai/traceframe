@@ -55,14 +55,14 @@ export function createFlowApi({ page, trace, clock, viewport, signal }) {
 
   const moveTo = async (locator, duration, name) => {
     const seconds = durationSeconds(duration ?? MOVE_SECONDS, `${name} duration`)
-    await locator.waitFor()
-    const box = await locator.boundingBox()
-    if (!box) throw new TraceframeError(`Could not find ${locator}.`, { code: 'FLOW_TARGET_MISSING' })
-    // A person does not chase a target that shifts under a pointer already inside it.
-    if (pointInsideBox(pointer, box)) return pointer
-    const point = await aimPoint(locator, box)
+    const target = await findTarget(locator)
+    // A person does not chase a target that shifts under a pointer already on it.
+    if (pointInsideBox(pointer, target.box)) return pointer
+    let point = await aimPoint(target)
     if (!insideViewport(point, viewport)) {
-      throw new TraceframeError(`${locator} is outside the viewport. Scroll explicitly before moving to it.`, { code: 'FLOW_TARGET_OUTSIDE_VIEWPORT' })
+      const aim = await reveal(target.element, locator)
+      if (!aim.visible) throw new TraceframeError(`${locator} could not be revealed by scrolling.`, { code: 'FLOW_TARGET_OUTSIDE_VIEWPORT' })
+      point = aim.point
     }
     await movePointer(point, seconds)
     const after = await locator.boundingBox()
@@ -141,19 +141,83 @@ function assertBelowLimit(events, limit, type) {
   }
 }
 
+async function findTarget(locator) {
+  await locator.waitFor()
+  const element = await locator.elementHandle()
+  const box = await element.boundingBox()
+  if (!box) throw new TraceframeError(`Could not find ${locator}.`, { code: 'FLOW_TARGET_MISSING' })
+  return { element, box }
+}
+
 function pointInsideBox(point, box) {
   return point.x >= box.x && point.x <= box.x + box.width && point.y >= box.y && point.y <= box.y + box.height
 }
 
 // Aim at the middle of the first line box, as Playwright does, so a link that wraps onto two lines is not missed.
-async function aimPoint(locator, box) {
-  const offset = await locator.evaluate((element) => {
-    const bounds = element.getBoundingClientRect()
-    const first = element.getClientRects()[0] ?? bounds
+async function aimPoint({ element, box }) {
+  const offset = await element.evaluate((target) => {
+    const bounds = target.getBoundingClientRect()
+    const first = target.getClientRects()[0] ?? bounds
     // As fractions of the element's size, because a scaled iframe makes the page box a different size than the element's own.
     return { x: (first.left + first.width / 2 - bounds.left) / bounds.width, y: (first.top + first.height / 2 - bounds.top) / bounds.height }
   })
   return { x: box.x + offset.x * box.width, y: box.y + offset.y * box.height }
+}
+
+async function reveal(element, locator) {
+  // Content that loads above the target during the scroll can push it out again.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const target = await scrollIntoView(element, locator)
+    const point = await aimPoint(target)
+    const visibility = await target.element.evaluate((node, offset) => new Promise((resolve) => {
+      new IntersectionObserver(([entry], observer) => {
+        observer.disconnect()
+        const bounds = node.getBoundingClientRect()
+        const x = bounds.left + offset.x * bounds.width
+        const y = bounds.top + offset.y * bounds.height
+        const rect = entry.intersectionRect
+        const shown = entry.intersectionRatio > 0
+        resolve({ shown, visible: shown && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom })
+      }).observe(node)
+    }), relativePoint(point, target.box))
+    if (visibility.visible || attempt === 1) return { point, ...visibility }
+    element = target.element
+  }
+}
+
+// Awaiting the scroll waits for a scrolling panel. Chromium resolves a page scroll before it stops, and a sticky target
+// or iframe can stay put while its page scrolls, so also wait for every enclosing page to stop.
+async function scrollIntoView(element, locator) {
+  await element.evaluate((target) => target.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+  try {
+    await element.waitForElementState('stable')
+    let frame = await element.ownerFrame()
+    while (frame) {
+      await frame.evaluate(() => new Promise((resolve) => {
+        let last
+        const check = () => {
+          const now = `${scrollX},${scrollY}`
+          if (now === last) resolve()
+          else requestAnimationFrame(check)
+          last = now
+        }
+        requestAnimationFrame(check)
+      }))
+      if (!frame.parentFrame()) break
+      await (await frame.frameElement()).waitForElementState('stable')
+      frame = frame.parentFrame()
+    }
+    // The page may replace the target while it scrolls, or remove or hide it, as a menu that closes on scroll does.
+    const target = await findTarget(locator).catch((error) => {
+      throw error.name === 'TimeoutError' ? new TraceframeError(`${locator} disappeared when it was scrolled into view.`, { code: 'FLOW_TARGET_MISSING', cause: error }) : error
+    })
+    await target.element.waitForElementState('stable')
+    const box = await target.element.boundingBox()
+    if (!box) throw new TraceframeError(`Could not find ${locator}.`, { code: 'FLOW_TARGET_MISSING' })
+    return { element: target.element, box }
+  } catch (error) {
+    throw error.name === 'TimeoutError' ? new TraceframeError(`${locator} kept moving after it was scrolled into view.`, { code: 'FLOW_TARGET_MOVED', cause: error }) : error
+  }
 }
 
 async function assertReceivesPointer(element, locator, point) {

@@ -12,7 +12,7 @@ Traceframe requires Node.js 22+, FFmpeg 5+ with `libx264` and `ffprobe` (for exa
 npx playwright@1.64.1 install --only-shell chromium
 ```
 
-To use a system Chrome instead, pass `--browser` or set `CHROME_PATH`. Playwright still needs its own FFmpeg build to record the page, so install it with `npx playwright@1.64.1 install ffmpeg`.
+To use a system Chrome instead, pass `--browser` or set `CHROME_PATH`. Playwright still needs its own FFmpeg build to record the page, so install it with `npx playwright@1.64.1 install ffmpeg`. Use Chrome 150 or later; with older versions, scrolling a target in a panel into view can fail.
 
 To record pages behind a login, pass a Playwright storage-state file with `--storage-state`. Keep it in `.auth/` or another ignored location.
 
@@ -81,7 +81,7 @@ The default function receives `page`, `signal`, and four helpers: `move({ x, y }
 
 The default function may run for 120 seconds, including waits for your backend. For longer flows, pass `--flow-timeout 300` (`flowTimeout: 300` in the API). This does not change Playwright's action timeouts.
 
-`click` and `hover` use real Playwright mouse events and add their movement to the overlay timeline. If the pointer is already inside the target, it stays where it is, so a hover effect that moves or resizes the target does not pull the cursor along. A click holds the mouse button for about 100 ms, as a person would, so press styles such as `:active` show in the video. Headless Chromium draws pages without a GPU, so on heavy pages, such as ones with blurred backgrounds, hover effects can appear a little after the cursor passes. A longer `duration`, or a `move` around hover-reactive elements, keeps this from showing. Typing, scrolling, dragging, multiple tabs, and direct `page.mouse` or `locator.click()` calls are not currently represented in that timeline. A flow receives an `AbortSignal`; helper calls stop promptly when the flow timeout is reached.
+`click` and `hover` use real Playwright mouse events and add their movement to the overlay timeline. When the point they aim at is outside the viewport, they first scroll the target smoothly into view, including its scrollable containers and iframes, and wait until scrolling stops. For a point already inside the viewport, they do not scroll automatically, even if a panel clips it or something covers it. Scroll explicitly first for clipping by a scrollable panel or a sticky header; wait for a dialog or toast to close. `click` fails with `FLOW_TARGET_OBSCURED` if the target is still covered when it presses. If the pointer is already inside the target's box, it stays where it is, so a hover effect that moves or resizes the target does not pull the cursor along. A click holds the mouse button for about 100 ms, as a person would, so press styles such as `:active` show in the video. Headless Chromium draws pages without a GPU, so on heavy pages, such as ones with blurred backgrounds, hover effects can appear a little after the cursor passes. A longer `duration`, or a `move` around hover-reactive elements, keeps this from showing. Typing, scrolling, dragging, multiple tabs, and direct `page.mouse` or `locator.click()` calls are not currently represented in that timeline. A flow receives an `AbortSignal`; helper calls stop promptly when the flow timeout is reached.
 
 ## Programmatic usage
 
