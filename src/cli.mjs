@@ -51,8 +51,8 @@ Options:
 The flow module must export a default function. It may also export
 ready({ page, signal }) to establish state before capture and initialPointer
 { x, y } to set where the cursor starts.
-The flow helpers are move(), hover(), click(), and wait(). A flow may contain
-at most ${LIMITS.maxMoves} move events and ${LIMITS.maxClicks} click events.
+The flow helpers are move(), hover(), click(), scroll(), and wait(). A flow
+may contain at most ${LIMITS.maxMoves} move events and ${LIMITS.maxClicks} click events.
 Each duration, dwell, and wait is at most ${LIMITS.maxActionDuration} seconds.
 `
 

@@ -208,6 +208,22 @@ test('clicks a target that the page replaces while it scrolls', { timeout: 30_00
   })
 })
 
+test('reveals a target clipped by an on-screen panel with explicit scroll', { timeout: 30_000 }, async () => {
+  const options = Array.from({ length: 20 }, (_, index) => `<li><button${index === 15 ? ' id="target"' : ''} onclick="this.dataset.clicked = 'yes'">Option ${index}</button></li>`).join('')
+  await withPage(`
+    <div style="height:900px"></div>
+    <ul style="height:100px;overflow:auto;margin:0">${options}</ul>
+    <div style="height:2000px"></div>
+    <script>scrollTo(0, 800)</script>
+  `, async ({ page, api }) => {
+    await assert.rejects(api.click(page.locator('#target'), { duration: 0.01, dwell: 0 }), { code: 'FLOW_TARGET_OBSCURED' })
+    assert.equal(await page.evaluate(() => scrollY), 800)
+    await api.scroll(page.locator('#target'))
+    await api.click(page.locator('#target'), { duration: 0.01, dwell: 0 })
+    assert.equal(await page.locator('#target').getAttribute('data-clicked'), 'yes')
+  })
+})
+
 test('scrolls again when content above the target grows during the scroll', { timeout: 30_000 }, async () => {
   await withPage(`
     <div style="height:1500px"></div>
@@ -222,7 +238,7 @@ test('scrolls again when content above the target grows during the scroll', { ti
   })
 })
 
-for (const action of ['click', 'hover']) {
+for (const action of ['click', 'hover', 'scroll']) {
   test(`${action} waits for a target that briefly re-renders during scrolling`, { timeout: 30_000 }, async () => {
     await withPage(`
       <!doctype html>
@@ -244,6 +260,10 @@ for (const action of ['click', 'hover']) {
       await api[action](button)
       if (action === 'click') assert.equal(await button.getAttribute('data-clicked'), 'yes')
       if (action === 'hover') assert.ok(await button.evaluate((element) => element.matches(':hover')))
+      if (action === 'scroll') {
+        assert.ok(await button.isVisible())
+        assert.equal(trace.moves.length, 0)
+      }
     })
   })
 
@@ -273,6 +293,13 @@ for (const action of ['click', 'hover']) {
       await api[action](button)
       if (action === 'click') assert.equal(await button.getAttribute('data-clicked'), 'yes')
       if (action === 'hover') assert.ok(await button.evaluate((element) => element.matches(':hover')))
+      if (action === 'scroll') {
+        const before = await button.boundingBox()
+        await page.waitForTimeout(1000)
+        const after = await button.boundingBox()
+        assert.ok(Math.abs(after.y - before.y) < 1, `Target moved ${after.y - before.y}px after scroll returned`)
+        assert.equal(trace.moves.length, 0)
+      }
     })
   })
 
@@ -293,6 +320,7 @@ for (const action of ['click', 'hover']) {
       await api[action](button)
       if (action === 'click') assert.equal(await button.getAttribute('data-clicked'), 'yes')
       if (action === 'hover') assert.ok(await button.evaluate((element) => element.matches(':hover')))
+      if (action === 'scroll') assert.equal(trace.moves.length, 0)
       const panel = await page.locator('#list').boundingBox()
       const box = await button.boundingBox()
       assert.ok(box.y >= panel.y && box.y + box.height <= panel.y + panel.height)
@@ -319,6 +347,31 @@ for (const action of ['click', 'hover']) {
   })
 }
 
+test('reports a replacement that keeps moving after scrolling', { timeout: 30_000 }, async () => {
+  await withPage(`
+    <!doctype html>
+    <style>.enter { animation:enter 1s linear infinite alternate } @keyframes enter { to { transform:translateY(100px) } }</style>
+    <section id="panel" style="margin:100px;height:350px;overflow:auto"><div style="height:800px"></div><button id="target">Action</button><div style="height:800px"></div></section>
+    <script>
+      panel.addEventListener('scroll', () => {
+        const button = document.querySelector('#target')
+        const replacement = button.cloneNode(true)
+        replacement.className = 'enter'
+        const loading = document.createElement('div')
+        loading.style.height = button.offsetHeight + 'px'
+        button.replaceWith(loading)
+        setTimeout(() => loading.replaceWith(replacement), 800)
+      }, { once: true })
+    </script>
+  `, async ({ page, trace, api }) => {
+    page.setDefaultTimeout(1500)
+    await assert.rejects(api.scroll(page.locator('#target')), {
+      code: 'FLOW_TARGET_MOVED', message: /kept moving after it was scrolled into view/,
+    })
+    assert.equal(trace.moves.length, 0)
+  })
+})
+
 test('refuses a target that cannot be scrolled into view', { timeout: 30_000 }, async () => {
   await withPage(`
     <button style="position:fixed;left:100px;top:700px" onclick="this.textContent = 'Clicked'">Action</button>
@@ -326,6 +379,86 @@ test('refuses a target that cannot be scrolled into view', { timeout: 30_000 }, 
     await assert.rejects(api.click(page.getByRole('button'), { duration: 0.01, dwell: 0 }), { code: 'FLOW_TARGET_OUTSIDE_VIEWPORT' })
     assert.equal(await page.getByRole('button').textContent(), 'Action')
     assert.equal(trace.moves.length, 0)
+  })
+})
+
+test('scrolls results into view without moving the pointer', { timeout: 30_000 }, async () => {
+  await withPage(`
+    <div style="height:100px;overflow:auto"><div style="height:400px;display:flex;align-items:end"><p id="panel">Panel result</p></div></div>
+    <p id="page" style="margin-top:1200px">Page result</p>
+    <iframe style="display:block;margin-top:1200px;width:220px;height:100px" srcdoc="<p id='frame' style='margin-top:400px'>Frame result</p>"></iframe>
+  `, async ({ page, trace, api }) => {
+    // The fraction of the result that the viewport, the panel, and the iframe leave in view.
+    const shown = (result) => result.evaluate((element) => new Promise((resolve) => {
+      new IntersectionObserver(([entry], observer) => {
+        observer.disconnect()
+        resolve(entry.intersectionRatio)
+      }).observe(element)
+    }))
+    for (const result of [page.locator('#panel'), page.locator('#page'), page.frameLocator('iframe').locator('#frame')]) {
+      await api.scroll(result)
+      assert.equal(await shown(result), 1)
+    }
+    assert.equal(trace.moves.length, 0)
+  })
+})
+
+test('centers a result that is already in view when explicitly scrolled', { timeout: 30_000 }, async () => {
+  await withPage(`
+    <div style="height:450px"></div>
+    <div style="width:300px;transform:scale(1.013);transform-origin:0 0"><p id="result" style="margin:0;height:40px">Result</p></div>
+    <div style="height:2000px"></div>
+  `, async ({ page, api }) => {
+    const result = page.locator('#result')
+    await api.scroll(result)
+    const box = await result.boundingBox()
+    assert.ok(Math.abs(box.y + box.height / 2 - 300) < 1)
+  })
+})
+
+test('scrolls a target out from under a sticky header', { timeout: 30_000 }, async () => {
+  await withPage(`
+    <header style="position:sticky;top:0;height:80px;background:#ddd">Header</header>
+    <div style="height:1000px"></div>
+    <button onclick="this.textContent = 'Clicked'">Action</button>
+    <div style="height:2000px"></div>
+    <script>scrollTo(0, document.querySelector('button').offsetTop - 30)</script>
+  `, async ({ page, api }) => {
+    const button = page.getByRole('button')
+    await api.scroll(button)
+    await api.click(button, { duration: 0.01, dwell: 0 })
+    assert.equal(await button.textContent(), 'Clicked')
+  })
+})
+
+test('refuses a result that cannot be scrolled into view', { timeout: 30_000 }, async () => {
+  await withPage(`
+    <p id="result" style="position:fixed;left:100px;top:700px">Result</p>
+  `, async ({ page, api }) => {
+    await assert.rejects(api.scroll(page.locator('#result')), { code: 'FLOW_TARGET_OUTSIDE_VIEWPORT' })
+  })
+})
+
+test('refuses a result that the page hides while it scrolls', { timeout: 30_000 }, async () => {
+  await withPage(`
+    <p id="result" style="margin-top:1200px">Result</p>
+    <div style="height:600px"></div>
+    <script>addEventListener('scroll', () => { document.querySelector('#result').style.visibility = 'hidden' }, { once: true })</script>
+  `, async ({ page, api }) => {
+    page.setDefaultTimeout(1500)
+    await assert.rejects(api.scroll(page.locator('#result')), { code: 'FLOW_TARGET_MISSING' })
+  })
+})
+
+test('waits for the page behind a partly hidden sticky result to stop', { timeout: 30_000 }, async () => {
+  await withPage(`
+    <main style="height:6000px"><aside id="result" style="position:sticky;top:-60px;height:100px">Result</aside></main>
+    <script>scrollTo(0, 1200)</script>
+  `, async ({ page, api }) => {
+    await api.scroll(page.locator('#result'))
+    const stopped = await page.evaluate(() => scrollY)
+    await api.wait(0.5)
+    assert.equal(await page.evaluate(() => scrollY), stopped)
   })
 })
 
@@ -389,3 +522,36 @@ test('clicks a menu that opens with a clip animation and closes on page scroll',
     assert.equal(await page.locator('#target').getAttribute('data-clicked'), 'yes')
   })
 })
+
+for (const overflow of ['hidden', 'auto']) {
+  test(`scrolls a target inside an overflow:${overflow} card out from under a sticky header`, { timeout: 30_000 }, async () => {
+    await withPage(`
+      <header style="position:sticky;top:0;height:100px;background:#ddd;z-index:3">Header</header>
+      <div style="height:800px"></div>
+      <section style="border-radius:12px;overflow:${overflow};padding:16px;width:400px"><button onclick="this.dataset.clicked='yes'">Action</button><p>Some text</p></section>
+      <div style="height:2000px"></div>
+      <script>scrollTo(0, document.querySelector('section').offsetTop - 30)</script>
+    `, async ({ page, api }) => {
+      const target = page.getByRole('button')
+      await api.scroll(target)
+      await api.click(target, { duration: 0.01, dwell: 0 })
+      assert.equal(await target.getAttribute('data-clicked'), 'yes')
+    })
+  })
+}
+
+for (const nested of [false, true]) {
+  test(`waits for every page around ${nested ? 'nested sticky iframes' : 'a sticky iframe'} to stop scrolling`, { timeout: 30_000 }, async () => {
+    const wrap = (content) => `<main style="height:6000px"><iframe style="display:block;position:sticky;top:-30px;width:400px;height:200px;border:0" srcdoc="${content.replaceAll('&', '&amp;').replaceAll('"', '&quot;')}"></iframe></main><script>scrollTo(0,1200)</script>`
+    const content = '<body style="margin:0"><button id="target" style="height:100px;width:200px">Result</button></body>'
+    await withPage(wrap(nested ? wrap(content) : content), async ({ page, api }) => {
+      const outer = page.frameLocator('iframe')
+      const target = (nested ? outer.frameLocator('iframe') : outer).locator('#target')
+      await api.scroll(target)
+      const positions = () => Promise.all(page.frames().map((frame) => frame.evaluate(() => [scrollX, scrollY])))
+      const stopped = await positions()
+      await api.wait(0.6)
+      assert.deepEqual(await positions(), stopped)
+    })
+  })
+}

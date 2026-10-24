@@ -108,6 +108,10 @@ export function createFlowApi({ page, trace, clock, viewport, signal }) {
       }
       await movePointer(point, durationSeconds(options.duration ?? MOVE_SECONDS, 'move duration'))
     },
+    async scroll(locator) {
+      const { shown } = await reveal((await findTarget(locator)).element, locator)
+      if (!shown) throw new TraceframeError(`${locator} could not be revealed by scrolling.`, { code: 'FLOW_TARGET_OUTSIDE_VIEWPORT' })
+    },
     async wait(seconds) {
       await sleep(durationSeconds(seconds, 'wait', { allowZero: true }) * 1000)
     },
@@ -235,7 +239,7 @@ async function assertReceivesPointer(element, locator, point) {
     return false
   }, relativePoint(point, box))
   if (!receivesPointer || !(await framesReceivePointer(element, point))) {
-    throw new TraceframeError(`${locator} is covered at the click point.`, { code: 'FLOW_TARGET_OBSCURED' })
+    throw new TraceframeError(`${locator} is covered at the click point. If a dialog or toast covers it, wait until it closes; if a panel clips it or a sticky header or bar covers it, call scroll() on the target first.`, { code: 'FLOW_TARGET_OBSCURED' })
   }
 }
 
