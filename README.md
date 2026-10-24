@@ -133,6 +133,8 @@ TRACEFRAME_PRESET=standard npm run test:smoke
 npm run test:package
 ```
 
+To release, set the version in `package.json` and `package-lock.json`, push all release changes to `main`, and publish a GitHub Release with the tag `v<version>` on the final tested commit containing those changes. The Release workflow reruns CI and stages the package on npm. A maintainer downloads it with `npm stage download`, checks that its files match `npm pack` at the tag, and approves it on npmjs.com with 2FA.
+
 After editing an SVG in `src/assets`, run `npm run build:assets` to rebuild its 1× and 2× PNGs.
 
 To re-record the committed sample:

@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  stage:
+    name: Stage on npm
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          check-latest: true
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Check that the release tag matches the package version
+        run: test "$RELEASE_TAG" = "v$(node -p "require('./package.json').version")"
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+
+      - name: Stage with npm trusted publishing
+        run: npm stage publish
