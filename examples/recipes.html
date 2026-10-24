@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Traceframe recording recipes</title>
+    <style>
+      :root { color-scheme: light; font: 18px/1.5 system-ui, sans-serif; color: #172033; background: #f4f6fa; }
+      * { box-sizing: border-box; }
+      main { max-width: 900px; margin: 40px auto; padding: 32px; border: 1px solid #dce1eb; border-radius: 16px; background: #fff; }
+      h1 { margin: 0; font-size: 28px; }
+      h2 { margin: 20px 0 8px; font-size: 18px; }
+      p { margin: 8px 0 20px; }
+      form > label { display: block; margin-bottom: 8px; }
+      .compose { display: flex; gap: 12px; }
+      input, button { font: inherit; padding: 10px 16px; border: 1px solid #aeb7c8; border-radius: 8px; }
+      input { min-width: 0; flex: 1; }
+      button { color: #fff; background: #3454b5; cursor: pointer; }
+      button:hover { background: #284393; }
+      button:disabled { opacity: 0.6; }
+      #status { min-height: 27px; margin: 8px 0; }
+      #replies { min-height: 80px; padding-left: 28px; }
+      #replies li { margin: 8px 0; }
+      .upload { display: inline-block; padding: 12px 16px; border: 1px dashed #aeb7c8; border-radius: 8px; cursor: pointer; }
+      .upload:hover { background: #f4f6fa; }
+      .scroll-area { height: 160px; overflow: auto; border: 1px solid #dce1eb; border-radius: 8px; }
+      .scroll-content { height: 360px; display: flex; align-items: end; padding: 20px; }
+      .below-fold { margin-top: 480px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Conversation demo</h1>
+      <p>Replies are simulated locally. No messages or files leave this page.</p>
+      <form id="conversation">
+        <label for="message">Message</label>
+        <div class="compose"><input id="message" dir="auto" required autocomplete="off"><button id="send">Send</button></div>
+      </form>
+      <p id="status" role="status">Ready for your question.</p>
+      <ol id="replies" aria-label="Replies"></ol>
+      <h2>Attach a file</h2>
+      <label class="upload" for="file">Choose a sample file</label><input id="file" type="file" hidden>
+      <p id="selected-file">No file selected.</p>
+      <h2 class="below-fold">Scroll to the last action</h2>
+      <section class="scroll-area" aria-label="More actions" tabindex="0">
+        <div class="scroll-content"><button id="finish" type="button">Finish demo</button></div>
+      </section>
+    </main>
+    <script>
+      const message = document.querySelector('#message')
+      const send = document.querySelector('#send')
+      const status = document.querySelector('#status')
+      const replies = document.querySelector('#replies')
+      document.querySelector('#conversation').addEventListener('submit', async (event) => {
+        event.preventDefault()
+        const text = message.value
+        message.value = ''
+        send.disabled = true
+        status.textContent = 'Preparing a reply…'
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+        const reply = document.createElement('li')
+        reply.dir = 'auto'
+        reply.textContent = `Reply ${replies.children.length + 1}: ${text}`
+        replies.append(reply)
+        status.textContent = 'Reply complete.'
+        send.disabled = false
+      })
+      document.querySelector('#file').addEventListener('change', (event) => {
+        document.querySelector('#selected-file').textContent = `Selected: ${event.target.files[0]?.name ?? 'none'}`
+      })
+      document.querySelector('#finish').addEventListener('click', (event) => { event.currentTarget.textContent = 'Demo complete' })
+    </script>
+  </body>
+</html>

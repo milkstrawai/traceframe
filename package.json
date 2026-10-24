@@ -24,7 +24,10 @@
     ".": "./src/index.mjs"
   },
   "files": [
-    "src"
+    "src",
+    "docs/recording-flows.md",
+    "examples/recipes.html",
+    "examples/recipes-flow.mjs"
   ],
   "engines": {
     "node": ">=22"

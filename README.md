@@ -49,6 +49,8 @@ npx @milkstraw/traceframe record \
   --preset draft
 ```
 
+The [recording guide](docs/recording-flows.md) includes a runnable example and recipes for typing, uploads, scrolling without a click, request headers, the browser locale, asynchronous responses, failed takes, shortening idle time, animated previews, and sharing.
+
 The `draft` preset uses a 1280×800 CSS viewport and produces 1280×800 at 30 FPS. The `standard` preset uses the same CSS viewport and encodes it at 2560×1600 at 60 FPS. The cursor and click pulses are always drawn at the full frame rate, but Chromium may capture page changes, such as scrolling and animations, at a lower rate at 2560×1600, depending on the machine. When that happens, the video repeats the last page frame until the next one arrives. The video is always the viewport size times `--scale`, so `--preset draft --scale 2` gives 2560×1600 at 30 FPS. The command prints a JSON summary when it finishes.
 
 Use `--run-dir .traceframe/runs/name` (`runDirectory` in the API) to keep the raw capture and the FFmpeg filter file. Keep that directory out of Git, because the raw capture shows everything the page showed. With this option, a flow that fails after recording starts keeps its partial raw capture for inspection; it has no rendered cursor overlay. Without this option, temporary captures are removed.
@@ -59,6 +61,7 @@ For a real application, ask your coding agent to inspect the running UI and crea
 
 ```text
 Create a Traceframe flow for this user journey: open Settings, change the theme, and save it.
+Follow the Traceframe recording guide: https://github.com/milkstrawai/traceframe/blob/main/docs/recording-flows.md
 Inspect the running application, use stable role or test-id locators, add a ready hook,
 and use Traceframe's click, hover, move, scroll, and wait helpers for visible interactions.
 Write the result to flow.mjs and explain how to run it.

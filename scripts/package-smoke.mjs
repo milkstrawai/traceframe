@@ -17,18 +17,21 @@ try {
   await run('npm', ['install', '--no-audit', '--no-fund', join(directory, filename)], { cwd: directory })
 
   const bin = join(directory, 'node_modules', '.bin', 'traceframe')
+  const examples = join(directory, 'node_modules', '@milkstraw', 'traceframe', 'examples')
   const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
   assert.equal((await run(bin, ['--version'])).stdout, `${version}\n`)
   assert.equal((await run(process.execPath, ['--input-type=module', '-e', 'const { record } = await import("@milkstraw/traceframe"); console.log(typeof record)'], { cwd: directory })).stdout, 'function\n')
 
   const { stdout } = await run(bin, [
     'record', '--preset', 'draft',
-    '--url', pathToFileURL(join(root, 'examples', 'fixture.html')).href,
-    '--flow', join(root, 'examples', 'fixture-flow.mjs'),
+    '--url', pathToFileURL(join(examples, 'recipes.html')).href,
+    '--flow', join(examples, 'recipes-flow.mjs'),
     '--out', join(directory, 'sample.mp4'),
   ], { cwd: directory })
   const summary = JSON.parse(stdout)
   assert.equal(summary.clickCount, 5)
+  assert.equal(summary.moveCount, 6)
+  await run('ffmpeg', ['-v', 'error', '-xerror', '-i', summary.output, '-f', 'null', '-'])
   console.log(JSON.stringify({ package: filename, duration: summary.duration }))
 } finally {
   await rm(directory, { recursive: true, force: true })
