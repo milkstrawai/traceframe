@@ -42,7 +42,7 @@ Options:
   --scale <1|2>                Device scale factor; the video is the viewport times this
   --fps <30|60>                Encoded frame rate
   --post-roll <seconds>        Tail after the flow (default: 0.3)
-  --ready-timeout <seconds>    Playwright timeout for the page load and calls in ready() (default: 30)
+  --ready-timeout <seconds>    Playwright default timeout during navigation and ready() (default: 30)
   --flow-timeout <seconds>     Time limit for the flow, including waits (default: 120)
   --run-dir <path>             Keep the raw capture and FFmpeg filter in this directory
   -h, --help                   Show this help

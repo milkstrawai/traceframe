@@ -1,6 +1,6 @@
 # Write a recording flow
 
-Use this guide yourself or give it to a coding agent with the journey you want to show. Traceframe controls the recorded pointer and scrolls its targets into view; the supplied Playwright page handles typing, file selection, and application checks.
+Use this guide yourself or give it to a coding agent with the journey you want to show. Traceframe provides pointer and scrolling helpers; the supplied Playwright page handles typing, file selection, and application checks.
 
 ## Run the example
 
@@ -20,32 +20,15 @@ In a repository clone, run `npx traceframe record --url "file://$PWD/examples/re
 
 Inspect the running application at the recording viewport. Pick a short journey with a visible result and known demo data. Use role, label, or test-id locators; `locator.describe()` can make errors clearer.
 
-Put setup and page readiness in `ready({ page, signal })`. This runs after initial navigation and before recording. Use `--storage-state` for an existing login, and keep that file in an ignored directory. `page.emulateMedia({ colorScheme: 'dark' })` updates CSS themes that follow the browser's color scheme. If the app reads the setting only at startup, set it before opening the app, as below.
-
-If the application needs request headers, a browser locale, or a color scheme from startup, record `--url about:blank` and open the application yourself in `ready`. Keep only the lines you need:
-
-```js
-export async function ready({ page }) {
-  await page.emulateMedia({ colorScheme: 'dark' })
-  await page.setExtraHTTPHeaders({ 'x-demo-access': 'demo' })
-  const cdp = await page.context().newCDPSession(page)
-  await cdp.send('Emulation.setLocaleOverride', { locale: 'ar-EG' })
-  await cdp.send('Emulation.setUserAgentOverride', { userAgent: '', acceptLanguage: 'ar-EG' })
-  await page.goto('http://localhost:3000')
-  await page.getByRole('heading', { name: 'Example workspace' }).waitFor()
-  await page.evaluate(() => document.fonts.ready)
-}
-```
-
-The two `Emulation` calls set the locale that `navigator.language`, `Intl`, and the `Accept-Language` header use; the empty `userAgent` keeps Chromium's own user agent and client hints. Traceframe waits for web fonts only on the `--url` page, so the last line waits for the application's fonts.
+Put setup and page readiness in `ready({ page, signal })`. This runs after initial navigation and before recording. Use `--storage-state` for an existing login, and keep that file in an ignored directory. For headers, locale, or themes, see [optional startup settings](#optional-startup-settings).
 
 ## Choose the right actions
 
 Use Traceframe's `click`, `hover`, and `move` for visible pointer actions. Direct `locator.click()` and `page.mouse` calls move the browser pointer without updating Traceframe's overlay or click pulses. Use Playwright for the other actions below; their page changes appear in the video.
 
-For a target clipped by a scrollable panel or covered by a sticky header, try `await scroll(target)` before the click. For a tooltip, a toast, or a closing dialog, wait until it is gone, or give the click a longer `dwell`. A covered click fails with an error that it "is covered at the click point" (`FLOW_TARGET_OBSCURED`); `hover` does not check for covers. See the [README](../README.md#have-an-agent-create-the-flow) for the scrolling rules and limits.
+For a target clipped by a scrollable panel or covered by a sticky header, try `await scroll(target)` before the click. For a tooltip, a toast, or a closing dialog, wait until it is gone, or give the click a longer `dwell`. A covered click fails with an error that it "is covered at the click point" (`FLOW_TARGET_OBSCURED`); `hover` does not check for covers. See the [scrolling rules and limits](../README.md#scrolling).
 
-If a list closes when the page scrolls, use the list's own scrolling container through Playwright, for example `await list.evaluate((element) => element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' }))` to show its final options, then click the option. Wait for any opening animation before scrolling. Both automatic scrolling and `scroll(target)` can move the outer page.
+Both automatic scrolling and `scroll(target)` can move the outer page, which closes some lists. For those lists, use their own scrolling container through Playwright, for example `await list.evaluate((element) => element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' }))` to show the final options, then click the option. Wait for any opening animation before scrolling.
 
 To show a result without a pointer action, use `await scroll(result)`. Centering a result taller than the view hides its start, so scroll to its heading or another element near its start instead.
 
@@ -71,9 +54,30 @@ A relative path is resolved from the directory where you run Traceframe. File se
 
 ## Wait for the current result
 
-Use an application completion condition before a follow-up. For a conversation that appends completed replies, the example waits for the next reply by index. For streamed answers, wait for that request's completion indicator instead; the first visible text or a previous reply is not completion.
+Before a follow-up, wait for the application to show that the current step is complete. For a conversation that appends completed replies, the example waits for the next reply by index. For streamed answers, wait for that request's completion indicator instead; the first visible text or a previous reply is not completion.
 
 Set a Playwright timeout explicitly when an individual operation may exceed its usual 30 seconds, such as `await newReply.waitFor({ timeout: 60_000 })`. Use Traceframe's `wait(seconds)` for reading time. Each helper wait is limited to 30 seconds, and the whole flow has a 120-second timeout that `--flow-timeout` (`flowTimeout` in the API) raises.
+
+## Optional startup settings
+
+`page.emulateMedia({ colorScheme: 'dark' })` in `ready` updates CSS themes that follow the browser's color scheme. If the app reads the setting only at startup, set it before opening the app, as below.
+
+If the application needs request headers, a browser locale, or a color scheme from startup, record `--url about:blank` and open the application yourself in `ready`. Keep only the lines you need:
+
+```js
+export async function ready({ page }) {
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.setExtraHTTPHeaders({ 'x-demo-access': 'demo' })
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Emulation.setLocaleOverride', { locale: 'ar-EG' })
+  await cdp.send('Emulation.setUserAgentOverride', { userAgent: '', acceptLanguage: 'ar-EG' })
+  await page.goto('http://localhost:3000')
+  await page.getByRole('heading', { name: 'Example workspace' }).waitFor()
+  await page.evaluate(() => document.fonts.ready)
+}
+```
+
+The two `Emulation` calls set the locale that `navigator.language`, `Intl`, and the `Accept-Language` header use; the empty `userAgent` keeps Chromium's own user agent and client hints. Traceframe waits for web fonts only on the `--url` page, so the last line waits for the application's fonts.
 
 ## Record, inspect, and refine
 
@@ -81,7 +85,7 @@ Use `--preset draft` while writing the flow and the default preset for the final
 
 While writing the flow, pass `--run-dir` with an ignored folder, such as `.traceframe/runs/demo`. A failed take then keeps its partial `capture.webm`, which has no cursor overlay and stops where the flow failed.
 
-A failed take may already have submitted real jobs, so reset demo data before recording again. Check the important transitions and the final result, then check the file for decode errors:
+A failed take may already have submitted real jobs, so reset demo data before recording again. Check the important transitions and the final result. You can also check the file for decode errors:
 
 ```sh
 ffmpeg -v error -xerror -i ./recording.mp4 -f null -

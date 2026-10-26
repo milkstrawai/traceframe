@@ -6,19 +6,21 @@ https://github.com/user-attachments/assets/38e02cd5-a9ba-4f3c-938c-159955353141
 
 ## Prerequisites
 
-Traceframe requires Node.js 22+, system FFmpeg 5+ with `libx264` and `ffprobe` (for example, `brew install ffmpeg` or `sudo apt install ffmpeg`), plus Playwright's Chromium and recording FFmpeg:
+Traceframe requires Node.js 22+ and system FFmpeg 5+ with `libx264` and `ffprobe` to render the MP4 (for example, `brew install ffmpeg` or `sudo apt install ffmpeg`). Playwright uses its own Chromium and FFmpeg builds to record the page. Install them with the exact Playwright version Traceframe uses; other cached versions are not used:
 
 ```sh
 npx playwright@1.64.1 install --only-shell chromium ffmpeg
 ```
 
-The Playwright version must match Traceframe's dependency; another cached browser version will not be used. To use a system Chrome instead, pass `--browser` or set `CHROME_PATH`, and install Playwright's recording FFmpeg with `npx playwright@1.64.1 install ffmpeg`. Use Chrome 150 or later; with older versions, scrolling a target in a panel into view can fail. System FFmpeg renders the finished MP4; it does not replace Playwright's recording binary. In a sandbox, such as a coding agent's, allow Playwright's browser download and let Chromium start.
+To use system Chrome 150 or later, pass `--browser` or set `CHROME_PATH`, and install Playwright's recording FFmpeg with `npx playwright@1.64.1 install ffmpeg`. Older Chrome versions can fail to scroll targets inside panels.
+
+In a sandbox, such as a coding agent's, allow Playwright's browser download and let Chromium start.
 
 To record pages behind a login, pass a Playwright storage-state file with `--storage-state`. Keep it in `.auth/` or another ignored location.
 
 ## Record a video
 
-Run Traceframe with `npx` without adding it to your project's dependencies. Pass your application URL and your own flow file:
+Run Traceframe with `npx` without adding it to your project's dependencies. Pass your application URL and your own [flow file](#write-a-flow):
 
 ```sh
 npx @milkstraw/traceframe record \
@@ -49,23 +51,15 @@ npx @milkstraw/traceframe record \
   --preset draft
 ```
 
-The [recording guide](docs/recording-flows.md) includes a runnable example and recipes for typing, uploads, scrolling without a click, request headers, the browser locale, asynchronous responses, failed takes, shortening idle time, animated previews, and sharing.
+The [recording guide](docs/recording-flows.md) includes a runnable example and recipes for form input, asynchronous results, browser settings, and editing or sharing a recording.
 
-The `draft` preset uses a 1280×800 CSS viewport and produces 1280×800 at 30 FPS. The `standard` preset uses the same CSS viewport and encodes it at 2560×1600 at 60 FPS. The cursor and click pulses are always drawn at the full frame rate, but Chromium may capture page changes, such as scrolling and animations, at a lower rate at 2560×1600, depending on the machine. When that happens, the video repeats the last page frame until the next one arrives. The video is always the viewport size times `--scale`, so `--preset draft --scale 2` gives 2560×1600 at 30 FPS. The command prints a JSON summary when it finishes.
+Both presets use a 1280×800 CSS viewport. `draft` produces 1280×800 at 30 FPS; `standard` (the default) produces 2560×1600 at 60 FPS. The output dimensions are the viewport times `--scale`, so `--preset draft --scale 2` gives 2560×1600 at 30 FPS. The command prints a JSON summary when it finishes.
 
-Use `--run-dir .traceframe/runs/name` (`runDirectory` in the API) to keep the raw capture and the FFmpeg filter file. Keep that directory out of Git, because the raw capture shows everything the page showed. With this option, a flow that fails after recording starts keeps its partial raw capture for inspection; it has no rendered cursor overlay. Without this option, temporary captures are removed.
+The cursor and click pulses are always drawn at the full frame rate. Chromium may capture page changes, such as scrolling and animations, at a lower rate at 2560×1600, depending on the machine. The video repeats the last page frame until the next one arrives.
 
-## Have an agent create the flow
+Use `--run-dir .traceframe/runs/name` (`runDirectory` in the API) to keep the raw capture and FFmpeg filter file, including a partial capture if the flow fails during recording. Keep that directory out of Git, because the raw capture shows everything the page showed.
 
-For a real application, ask your coding agent to inspect the running UI and create the flow from the user journey. This keeps selectors tied to the product and avoids manually guessing coordinates. For example:
-
-```text
-Create a Traceframe flow for this user journey: open Settings, change the theme, and save it.
-Follow the Traceframe recording guide: https://github.com/milkstrawai/traceframe/blob/main/docs/recording-flows.md
-Inspect the running application, use stable role or test-id locators, add a ready hook,
-and use Traceframe's click, hover, move, scroll, and wait helpers for visible interactions.
-Write the result to flow.mjs and explain how to run it.
-```
+## Write a flow
 
 The flow module exports a default function. Timing values are seconds:
 
@@ -80,15 +74,55 @@ export default async function ({ page, click, wait }) {
 }
 ```
 
-`ready({ page, signal })` runs after initial navigation and before recording starts. `--ready-timeout` (30 seconds by default) is Playwright's timeout for the page load and for each Playwright call in `ready`; it does not limit other work in the hook. A flow can also export `initialPointer = { x, y }` to choose where the cursor starts. By default it starts near the lower left.
+The optional `ready({ page, signal })` hook runs after initial navigation and before recording starts. Export `initialPointer = { x, y }` to choose where the cursor starts; by default it starts near the lower left.
 
-The default function receives `page`, `signal`, and five helpers: `move({ x, y }, { duration })`, `hover(locator, { duration })`, `click(locator, { duration, dwell })`, `scroll(locator)`, and `wait(seconds)`. A move takes 0.5 seconds unless you pass `duration`, and a click rests on the target for 0.25 seconds (`dwell`) before it presses. If the target is disabled, the click waits for it to become enabled. `scroll` smoothly centers a target vertically through the page and its scrollable containers and waits until scrolling stops, without moving the pointer. Use it to show a result, reveal a target clipped by a scrollable panel, or move a target away from a sticky header before a click. It also centers targets that are already on screen. Centering cannot clear every cover, such as a sticky bar taller than half the viewport or scrolling panel, or reveal content hidden by `overflow: clip`. A flow may contain at most 100 moves and 100 clicks, and each `duration`, `dwell`, and `wait` is at most 30 seconds. Error messages name the locator; give it a clearer name with Playwright's `locator.describe('Save settings')`.
+### Helpers
 
-The default function may run for 120 seconds, including waits for your backend. For longer flows, pass `--flow-timeout 300` (`flowTimeout: 300` in the API). This does not change Playwright's action timeouts.
+The default function receives a Playwright `page`, an `AbortSignal` named `signal`, and five helpers:
 
-`click` and `hover` use real Playwright mouse events and add their movement to the overlay timeline. When the point they aim at is outside the viewport, they first scroll the target smoothly into view, including its scrollable containers and iframes, and wait until scrolling stops. For a point already inside the viewport, they do not scroll automatically, even if a panel clips it or something covers it. Use `scroll(target)` first for clipping by a scrollable panel or a sticky header; wait for a dialog or toast to close. `click` fails with `FLOW_TARGET_OBSCURED` if the target is still covered when it presses. If the pointer is already inside the target's box, it stays where it is, so a hover effect that moves or resizes the target does not pull the cursor along. A click holds the mouse button for about 100 ms, as a person would, so press styles such as `:active` show in the video. Headless Chromium draws pages without a GPU, so on heavy pages, such as ones with blurred backgrounds, hover effects can appear a little after the cursor passes. A longer `duration`, or a `move` around hover-reactive elements, keeps this from showing. A flow receives an `AbortSignal`; helper calls stop promptly when the flow timeout is reached.
+| Helper | Use |
+| --- | --- |
+| `move({ x, y }, { duration })` | Move the pointer to viewport coordinates. |
+| `hover(locator, { duration })` | Move the pointer to a locator. |
+| `click(locator, { duration, dwell })` | Move, pause, and click a locator. |
+| `scroll(locator)` | Center a target without moving the pointer. |
+| `wait(seconds)` | Pause for reading time. |
+
+A move takes 0.5 seconds by default. A click pauses on the target for 0.25 seconds (`dwell`) before pressing, and waits for a disabled target to become enabled. `click` and `hover` leave the pointer in place if it is already inside the target's box.
+
+Error messages name the locator; give it a clearer name with Playwright's `locator.describe('Save settings')`.
+
+### Scrolling
+
+`click` and `hover` scroll automatically only when their aim point starts outside the viewport. They scroll smoothly through the page, scrollable containers, and iframes, and wait for scrolling to stop before moving the pointer.
+
+`scroll(target)` smoothly centers the target vertically, even if it is already visible, and waits for scrolling to stop without moving the pointer. Use it to show a result or before clicking a target clipped by a scrollable panel or covered by a sticky header. Wait for a dialog or toast to close instead.
+
+Centering can leave a target partly visible or covered, for example by a sticky bar taller than half the height of the viewport or its scrolling panel. It cannot reveal content hidden by `overflow: clip`. `click` fails with `FLOW_TARGET_OBSCURED` if the target is still covered when it presses.
+
+### Timing and limits
+
+`--ready-timeout` (default: 30 seconds) sets Playwright's default timeout during initial navigation and `ready`, for operations that accept a timeout. It does not set a deadline for the whole hook.
+
+The default function may run for 120 seconds, including waits for your backend. For longer flows, pass `--flow-timeout 300` (`flowTimeout: 300` in the API). This does not change Playwright's action timeouts. Helper calls stop promptly when the flow timeout is reached.
+
+A flow may contain at most 100 moves and 100 clicks, and each `duration`, `dwell`, and `wait` is at most 30 seconds.
+
+### What appears in the video
 
 Playwright typing and scrolling appear in the captured page. Direct `page.mouse`, `locator.click()`, and dragging calls bypass Traceframe's cursor trace and click pulses, so use its pointer helpers for visible interactions. Only the starting page is recorded; new tabs and popups do not appear in the video.
+
+### Have an agent create the flow
+
+You can ask a coding agent to inspect your running UI and write the flow from a journey:
+
+```text
+Create a Traceframe flow for this user journey: open Settings, change the theme, and save it.
+Follow the Traceframe recording guide: https://github.com/milkstrawai/traceframe/blob/main/docs/recording-flows.md
+Inspect the running application, use stable role or test-id locators, add a ready hook,
+and use Traceframe's click, hover, move, scroll, and wait helpers for visible interactions.
+Write the result to flow.mjs and explain how to run it.
+```
 
 ## Programmatic usage
 
@@ -115,13 +149,13 @@ Pass `signal` to stop a recording early. Traceframe closes the browser, stops FF
 
 ## Sample output
 
-The committed sample is generated from the included fixture flow with the `standard` preset (2560×1600 at 60 FPS) and is about 12 seconds long:
+The committed sample is generated from the [repository's fixture flow](examples/fixture-flow.mjs) with the `standard` preset (2560×1600 at 60 FPS) and is about 12 seconds long:
 
 [Download the sample video](https://github.com/milkstrawai/traceframe/blob/main/examples/sample-output.mp4)
 
-The cursor and click-pulse artwork and the example page's icons were made for Traceframe and are distributed under this repository's MIT license.
+The cursor and click-pulse artwork and the fixture page's icons were made for Traceframe and are distributed under this repository's MIT license.
 
-The example page uses the [Inter](https://github.com/rsms/inter) font, included under the SIL Open Font License in `examples/fonts/OFL.txt`.
+The fixture page uses the [Inter](https://github.com/rsms/inter) font, included under the SIL Open Font License in `examples/fonts/OFL.txt`.
 
 ## Development
 
@@ -133,7 +167,7 @@ TRACEFRAME_PRESET=standard npm run test:smoke
 npm run test:package
 ```
 
-To release, set the version in `package.json` and `package-lock.json`, push all release changes to `main`, and publish a GitHub Release with the tag `v<version>` on the final tested commit containing those changes. The Release workflow reruns CI and stages the package on npm. A maintainer downloads it with `npm stage download`, checks that its files match `npm pack` at the tag, and approves it on npmjs.com with 2FA.
+To release, set the version in `package.json` and `package-lock.json`, push all release changes to `main`, and publish a GitHub Release with the tag `v<version>` on the final tested commit containing those changes. The Release workflow reruns CI and stages the package on npm. A maintainer downloads it with `npm stage download <stage-id>`, checks that its files match `npm pack` at the tag, and approves it on npmjs.com with 2FA.
 
 After editing an SVG in `src/assets`, run `npm run build:assets` to rebuild its 1× and 2× PNGs.
 
