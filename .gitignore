@@ -3,6 +3,7 @@ node_modules/
 *.mp4
 .traceframe/
 .auth/
+/mds/
 .DS_Store
 
 !examples/sample-output.mp4

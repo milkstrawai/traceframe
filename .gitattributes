@@ -1,0 +1,12 @@
+# Collapse documentation, tests, and generated files in GitHub diffs.
+README.md linguist-generated
+docs/** linguist-generated
+test/** linguist-generated
+CHANGELOG.md linguist-generated
+package-lock.json linguist-generated
+src/assets/*-1x.png linguist-generated
+src/assets/*-2x.png linguist-generated
+examples/sample-output.mp4 linguist-generated
+
+# Keep source SVGs, generators, workflows, and agent instructions visible.
+examples/fonts/** linguist-vendored
