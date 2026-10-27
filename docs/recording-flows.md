@@ -62,14 +62,14 @@ Set a Playwright timeout explicitly when an individual operation may exceed its 
 
 For a review video, explain what the viewer should notice. Show the caption, pause before moving the pointer, perform the action, then hold the result. Start with about 12 characters per second and a 2.5-second minimum for reading, followed by a 2.5–4 second result hold.
 
-Use Playwright's [`page.screencast.showOverlay()`](https://playwright.dev/docs/api/class-screencast#screencast-show-overlay) inside the flow. Keep the caption compact, centered, and clear of the controls and results being shown. Keep its handle and dispose of it after the result hold:
+Use Playwright's [`page.screencast.showOverlay()`](https://playwright.dev/docs/api/class-screencast#screencast-show-overlay) inside the flow. Keep the caption compact, centered, and clear of the controls and results being shown. Traceframe's covered-click check ignores this pointer-transparent caption; use `top: 32px` instead of `bottom: 32px` when it would hide controls or results near the bottom. Keep its handle and dispose of it after the result hold:
 
 ```js
 const text = 'Open Actions to inspect the available options.'
 const caption = await page.screencast.showOverlay(`
   <div style="position: fixed; left: 24px; right: 24px; bottom: 32px;
     display: flex; justify-content: center; pointer-events: none;">
-    <div style="max-width: 720px; padding: 12px 20px; border-radius: 10px;
+    <div dir="auto" style="max-width: 720px; padding: 12px 20px; border-radius: 10px;
       background: #18181b; color: #fff;
       box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
       font: 500 20px/1.45 system-ui, sans-serif;
@@ -88,11 +88,11 @@ try {
 }
 ```
 
-Omit `duration` when actions should happen while the caption is visible: awaiting `showOverlay(html, { duration: 3000 })` waits until the overlay is removed. The example uses fixed text; escape dynamic text before inserting it into HTML.
+Omit `duration` when actions should happen while the caption is visible. Playwright uses milliseconds for `duration`: awaiting `showOverlay(html, { duration: 3000 })` waits until the overlay is removed. The example uses fixed text; escape dynamic text before inserting it into HTML.
 
-Playwright restores overlays after a full-page navigation, but they can briefly disappear while the new document loads. For a clean caption transition, finish the reading pause and dispose of the current caption before the navigation, then show the next caption after the destination is ready.
+Playwright restores overlays after a full-page navigation, but they can briefly disappear while the new document loads. Opening a native modal `<dialog>` can also briefly cover an existing caption. For a clean caption transition, finish the reading pause and dispose of the current caption before the action that navigates or opens the dialog, then show the next caption after the destination or dialog is ready.
 
-Keep captions short. Reading pauses and result holds count toward the flow timeout; for a longer video, raise it with, for example, `--flow-timeout 240` (seconds).
+Keep captions short. Split longer text into separate captions so each reading pause stays within the helper's 30-second limit. Reading pauses and result holds count toward the flow timeout; for a longer video, raise it with, for example, `--flow-timeout 240` (seconds).
 
 ## Optional startup settings
 
