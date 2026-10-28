@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { parseArgs } from 'node:util'
 
 import { LIMITS } from './flow.mjs'
+import { formatFailure } from './diagnostics.mjs'
 import { record } from './record.mjs'
 
 const { version: VERSION } = createRequire(import.meta.url)('../package.json')
@@ -44,7 +45,7 @@ Options:
   --post-roll <seconds>        Tail after the flow (default: 0.3)
   --ready-timeout <seconds>    Playwright default timeout during navigation and ready() (default: 30)
   --flow-timeout <seconds>     Time limit for the flow, including waits (default: 120)
-  --run-dir <path>             Keep the raw capture and FFmpeg filter in this directory
+  --run-dir <path>             Keep the raw capture, failure screenshot and FFmpeg filter
   -h, --help                   Show this help
   -v, --version                Show the version
 
@@ -74,7 +75,7 @@ try {
     process.stderr.write('traceframe: Recording was interrupted.\n')
     process.exitCode = SIGNAL_EXIT_CODES[interruptedBy]
   } else {
-    process.stderr.write(`traceframe: ${error instanceof Error ? error.message : String(error)}\n`)
+    process.stderr.write(formatFailure(error))
     process.exitCode = 1
   }
 }

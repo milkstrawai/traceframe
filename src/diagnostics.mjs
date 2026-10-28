@@ -1,6 +1,8 @@
 import { realpath, stat } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 
+import { TraceframeError } from './errors.mjs'
+
 // Only report the supplied flow's locations, never the rest of a stack or error object.
 export async function addDiagnostics(error, { flow, ...details }) {
   if (!(error instanceof Error)) return error
@@ -31,4 +33,18 @@ export async function addDiagnostics(error, { flow, ...details }) {
 export async function retainedFile(path) {
   const info = await stat(path).catch(() => undefined)
   return info?.isFile() && info.size > 0 ? path : undefined
+}
+
+export function formatFailure(error) {
+  const message = error instanceof Error ? error.message : String(error)
+  const code = error instanceof TraceframeError && error.code ? `[${error.code}] ` : ''
+  const lines = [`traceframe: ${code}${message.trimEnd()}`]
+  const diagnostics = error?.diagnostics
+  for (const { file, line, column } of diagnostics?.flowLocations ?? []) {
+    lines.push(`  Flow: ${file}:${line}:${column}`)
+  }
+  if (Number.isFinite(diagnostics?.recordingTime)) lines.push(`  Recording time: ${diagnostics.recordingTime.toFixed(2)} s`)
+  if (diagnostics?.capturePath) lines.push(`  Capture: ${diagnostics.capturePath}`)
+  if (diagnostics?.screenshotPath) lines.push(`  Screenshot: ${diagnostics.screenshotPath}`)
+  return `${lines.join('\n')}\n`
 }

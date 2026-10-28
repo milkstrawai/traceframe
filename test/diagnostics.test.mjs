@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import { addDiagnostics } from '../src/diagnostics.mjs'
+import { addDiagnostics, formatFailure } from '../src/diagnostics.mjs'
 import { TraceframeError } from '../src/errors.mjs'
 
 test('extracts only exact flow locations across causes, without exposing other error fields', async () => {
@@ -56,4 +56,34 @@ test('unavailable stacks and frozen errors do not replace the original failure',
   const frozen = Object.freeze(new Error('frozen'))
   assert.equal(await addDiagnostics(frozen, { flow }), frozen)
   assert.equal(await addDiagnostics(null, { flow }), null)
+})
+
+test('formats only the original message, Traceframe code and selected diagnostics', () => {
+  const error = new TraceframeError('locator timed out\nCall log:\n  - waiting for Saved\n', {
+    code: 'FLOW_FAILED', cause: new Error('synthetic private cause detail'),
+  })
+  error.diagnostics = {
+    flowLocations: [{ file: '/example/flow.mjs', line: 4, column: 9 }],
+    recordingTime: 12.345,
+    capturePath: '/example/run/capture.webm',
+    screenshotPath: '/example/run/failure.png',
+    extra: 'synthetic private extra detail',
+  }
+  error.privateState = 'synthetic private state'
+  assert.equal(formatFailure(error), `traceframe: [FLOW_FAILED] locator timed out
+Call log:
+  - waiting for Saved
+  Flow: /example/flow.mjs:4:9
+  Recording time: 12.35 s
+  Capture: /example/run/capture.webm
+  Screenshot: /example/run/failure.png
+`)
+})
+
+test('omits unavailable diagnostics and keeps ordinary usage errors concise', () => {
+  assert.equal(formatFailure(new Error('Unknown option')), 'traceframe: Unknown option\n')
+  assert.equal(formatFailure('plain failure'), 'traceframe: plain failure\n')
+  const error = new TraceframeError('not ready', { code: 'READY_FAILED' })
+  error.diagnostics = { flowLocations: [] }
+  assert.equal(formatFailure(error), 'traceframe: [READY_FAILED] not ready\n')
 })

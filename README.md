@@ -59,6 +59,8 @@ The cursor and click pulses are always drawn at the full frame rate. Chromium ma
 
 Use `--run-dir .traceframe/runs/name` (`runDirectory` in the API) to keep the raw capture and FFmpeg filter file, including a partial capture if the flow fails during recording. On a preparation or recording failure, Traceframe also tries to save a viewport screenshot as `failure.png`. Keep that directory out of Git, because captures and screenshots can contain private page data.
 
+When available, failure output includes the error code, flow-file locations, elapsed recording time, and paths to artifacts saved for that attempt. Without `--run-dir`, temporary captures are removed and no failure screenshot is saved.
+
 ## Write a flow
 
 The flow module exports a default function. Timing values are seconds:
