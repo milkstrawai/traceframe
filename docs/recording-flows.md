@@ -119,13 +119,29 @@ The two `Emulation` calls set the locale that `navigator.language`, `Intl`, and 
 
 Use `--preset draft` while writing the flow and the default preset for the final video.
 
-While writing the flow, pass `--run-dir` with an ignored folder, such as `.traceframe/runs/demo`. A failed take then keeps its partial `capture.webm`, which has no cursor overlay and stops where the flow failed.
+While writing the flow, pass `--run-dir` with an ignored folder, such as `.traceframe/runs/demo`. Use a separate directory for each take. A failed take keeps its partial `capture.webm` when saving succeeds and attempts a viewport screenshot, `failure.png`. The raw capture has no added cursor overlay and may include repeated final frames after the failure time.
 
 A failed take may already have submitted real jobs, so reset demo data before recording again. Check the important transitions and the final result. You can also check the file for decode errors:
 
 ```sh
 ffmpeg -v error -xerror -i ./recording.mp4 -f null -
 ```
+
+## Diagnose a failed take
+
+The CLI keeps the original error message and adds available context on standard error. For example:
+
+```text
+traceframe: [FLOW_FAILED] Expected the Saved status.
+  Flow: /project/review.mjs:18:9
+  Recording time: 12.35 s
+  Capture: /project/.traceframe/runs/demo/capture.webm
+  Screenshot: /project/.traceframe/runs/demo/failure.png
+```
+
+Inspect the reported screenshot, then the capture near the reported time if needed. The time is measured from the first captured frame before diagnostic collection; it is not the raw file's duration. Correct the locator or application check and reset demo data before retrying.
+
+Only paths saved for the current attempt are reported. A closed or unresponsive page may prevent a screenshot or capture from being saved. Errors before the first frame have no recording time, and a flow timeout may have no source location. Without `--run-dir`, flow locations and timing are still reported when available, but temporary captures are removed and no failure screenshot is saved. The API exposes the same context through [`error.diagnostics`](../README.md#programmatic-usage).
 
 ## Edit the finished video
 
