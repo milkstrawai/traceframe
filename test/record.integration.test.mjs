@@ -54,6 +54,26 @@ test('an already aborted signal stops before the flow file is loaded', async () 
   })
 })
 
+test('flow-loading failures report available locations without creating recording artifacts', async () => {
+  const source = `const settings = {}
+settings.recording.enabled
+export default () => {}`
+  await withRecording(source, async ({ options, fixtures, temp, outputDirectory }) => {
+    const runDirectory = join(fixtures, 'run')
+    let error
+    await assert.rejects(record({ ...options, runDirectory }), (caught) => { error = caught; return true })
+    const cause = await import(pathToFileURL(options.flow).href).catch((caught) => caught)
+    assert.equal(error.code, 'INVALID_FLOW')
+    assert.equal(error.cause, cause)
+    assert.match(error.message, /Could not load flow:/)
+    assert.ok(error.diagnostics.flowLocations.some(({ file, line }) => file === options.flow && line === 2))
+    assert.deepEqual(Object.keys(error.diagnostics), ['flowLocations'])
+    assert.equal(existsSync(runDirectory), false)
+    assert.deepEqual(await readdir(temp), [])
+    assert.deepEqual(await readdir(outputDirectory), [])
+  })
+})
+
 test('the flow timeout stops a flow that ignores its signal and removes temporary files', { timeout: 30_000 }, async () => {
   await withRecording('export default async () => { await new Promise(() => {}) }', async ({ options, temp, outputDirectory }) => {
     await assert.rejects(record({ ...options, preset: 'draft', flowTimeout: 0.2, signal: AbortSignal.timeout(10_000) }), {

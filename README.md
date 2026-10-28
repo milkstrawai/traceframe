@@ -57,7 +57,7 @@ Both presets use a 1280×800 CSS viewport. `draft` produces 1280×800 at 30 FPS;
 
 The cursor and click pulses are always drawn at the full frame rate. Chromium may capture page changes, such as scrolling and animations, at a lower rate at 2560×1600, depending on the machine. The video repeats the last page frame until the next one arrives.
 
-Use `--run-dir .traceframe/runs/name` (`runDirectory` in the API) to keep the raw capture and FFmpeg filter file, including a partial capture if the flow fails during recording. Keep that directory out of Git, because the raw capture shows everything the page showed.
+Use `--run-dir .traceframe/runs/name` (`runDirectory` in the API) to keep the raw capture and FFmpeg filter file, including a partial capture if the flow fails during recording. On a preparation or recording failure, Traceframe also tries to save a viewport screenshot as `failure.png`. Keep that directory out of Git, because captures and screenshots can contain private page data.
 
 ## Write a flow
 
@@ -143,9 +143,22 @@ await record({
 })
 ```
 
-Traceframe's own errors are `TraceframeError` instances (exported by the package) with a `code`, such as `READY_FAILED` or `FLOW_TARGET_OBSCURED`.
+Traceframe's own errors are `TraceframeError` instances (exported by the package) with a `code`, such as `READY_FAILED` or `FLOW_TARGET_OBSCURED`. Other exceptions thrown by the flow become `FLOW_FAILED`, with the original thrown value in `cause`; existing Traceframe error codes and causes are preserved.
+
+When available, `error.diagnostics` contains:
+
+| Field | Meaning |
+| --- | --- |
+| `flowLocations` | Locations in the supplied flow file, as `{ file, line, column }` objects with an absolute path and 1-based line/column. Empty when the error stack has no matching frame. |
+| `recordingTime` | Elapsed seconds from the first captured frame for a capture-stage failure, measured before collecting failure artifacts. Omitted before the first frame and for later rendering failures. |
+| `capturePath` | Absolute path to the retained raw capture, only when `runDirectory` was supplied and saving succeeded. |
+| `screenshotPath` | Absolute path to the saved failure screenshot, only when `runDirectory` was supplied and the screenshot succeeded. |
+
+A flow timeout may have no flow location because it is raised outside the blocked operation. Screenshots are best effort and have a five-second collection budget. Partial captures are saved before browser shutdown, with no fixed time limit so slower encoders can finish. Diagnostic failures do not replace the original error.
 
 Pass `signal` to stop a recording early. Traceframe closes the browser, stops FFmpeg, and removes its temporary files before rejecting with the signal's reason. When you pass a signal, Traceframe leaves Ctrl-C and other termination signals to you. The CLI does this for you: the first Ctrl-C stops and cleans up, and a second one exits at once.
+
+A stuck recording encoder can delay saving and cancellation indefinitely. A second Ctrl-C forces the CLI to exit and can discard the unfinished capture. API callers that need a hard shutdown deadline should run recording in a separate process they can terminate.
 
 ## Sample output
 
