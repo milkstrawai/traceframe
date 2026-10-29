@@ -35,6 +35,7 @@ export function createFlowApi({ page, trace, clock, viewport, signal }) {
   const sleep = (milliseconds) => delay(milliseconds, undefined, { signal })
 
   const movePointer = async (point, duration) => {
+    signal?.throwIfAborted()
     assertBelowLimit(trace.moves, LIMITS.maxMoves, 'move')
     const from = pointer
     const to = { x: point.x, y: point.y }
@@ -48,6 +49,7 @@ export function createFlowApi({ page, trace, clock, viewport, signal }) {
       await sleep(Math.min(MOVE_SAMPLE_MS, total - elapsed))
       elapsed = Math.min(total, performance.now() - startedAt)
       const eased = easeOutCubic(elapsed / total)
+      signal?.throwIfAborted()
       await page.mouse.move(from.x + (to.x - from.x) * eased, from.y + (to.y - from.y) * eased)
     }
     pointer = to
@@ -55,17 +57,17 @@ export function createFlowApi({ page, trace, clock, viewport, signal }) {
 
   const moveTo = async (locator, duration, name) => {
     const seconds = durationSeconds(duration ?? MOVE_SECONDS, `${name} duration`)
-    const target = await findTarget(locator)
+    const target = await findTarget(locator, signal)
     // A person does not chase a target that shifts under a pointer already on it.
     if (pointInsideBox(pointer, target.box)) return pointer
     let point = await aimPoint(target)
     if (!insideViewport(point, viewport)) {
-      const aim = await reveal(target.element, locator)
+      const aim = await reveal(target.element, locator, signal)
       if (!aim.visible) throw new TraceframeError(`${locator} could not be revealed by scrolling.`, { code: 'FLOW_TARGET_OUTSIDE_VIEWPORT' })
       point = aim.point
     }
     await movePointer(point, seconds)
-    const after = await locator.boundingBox()
+    const after = await locator.boundingBox({ signal })
     if (!after || !pointInsideBox(point, after)) {
       throw new TraceframeError(`${locator} moved while the pointer was arriving.`, { code: 'FLOW_TARGET_MOVED' })
     }
@@ -82,12 +84,13 @@ export function createFlowApi({ page, trace, clock, viewport, signal }) {
       const point = await moveTo(locator, options.duration, 'click')
       await sleep(dwell * 1000)
       // Hold on to this element: a control may rename or hide itself once it is pressed.
-      const element = await locator.elementHandle()
-      await element.waitForElementState('enabled').catch((error) => {
+      const element = await locator.elementHandle({ signal })
+      await element.waitForElementState('enabled', { signal }).catch((error) => {
         throw error.name === 'TimeoutError' ? new TraceframeError(`${locator} stayed disabled.`, { code: 'FLOW_TARGET_DISABLED', cause: error }) : error
       })
       await assertReceivesPointer(element, locator, point)
       const at = secondsSince(clock)
+      signal?.throwIfAborted()
       await page.mouse.down()
       try {
         await sleep(PRESS_HOLD_MS)
@@ -109,7 +112,7 @@ export function createFlowApi({ page, trace, clock, viewport, signal }) {
       await movePointer(point, durationSeconds(options.duration ?? MOVE_SECONDS, 'move duration'))
     },
     async scroll(locator) {
-      const { shown } = await reveal((await findTarget(locator)).element, locator)
+      const { shown } = await reveal((await findTarget(locator, signal)).element, locator, signal)
       if (!shown) throw new TraceframeError(`${locator} could not be revealed by scrolling.`, { code: 'FLOW_TARGET_OUTSIDE_VIEWPORT' })
     },
     async wait(seconds) {
@@ -145,9 +148,9 @@ function assertBelowLimit(events, limit, type) {
   }
 }
 
-async function findTarget(locator) {
-  await locator.waitFor()
-  const element = await locator.elementHandle()
+async function findTarget(locator, signal) {
+  await locator.waitFor({ signal })
+  const element = await locator.elementHandle({ signal })
   const box = await element.boundingBox()
   if (!box) throw new TraceframeError(`Could not find ${locator}.`, { code: 'FLOW_TARGET_MISSING' })
   return { element, box }
@@ -168,10 +171,10 @@ async function aimPoint({ element, box }) {
   return { x: box.x + offset.x * box.width, y: box.y + offset.y * box.height }
 }
 
-async function reveal(element, locator) {
+async function reveal(element, locator, signal) {
   // Content that loads above the target during the scroll can push it out again.
   for (let attempt = 0; attempt < 2; attempt++) {
-    const target = await scrollIntoView(element, locator)
+    const target = await scrollIntoView(element, locator, signal)
     const point = await aimPoint(target)
     const visibility = await target.element.evaluate((node, offset) => new Promise((resolve) => {
       new IntersectionObserver(([entry], observer) => {
@@ -191,10 +194,11 @@ async function reveal(element, locator) {
 
 // Awaiting the scroll waits for a scrolling panel. Chromium resolves a page scroll before it stops, and a sticky target
 // or iframe can stay put while its page scrolls, so also wait for every enclosing page to stop.
-async function scrollIntoView(element, locator) {
+async function scrollIntoView(element, locator, signal) {
+  signal?.throwIfAborted()
   await element.evaluate((target) => target.scrollIntoView({ behavior: 'smooth', block: 'center' }))
   try {
-    await element.waitForElementState('stable')
+    await element.waitForElementState('stable', { signal })
     let frame = await element.ownerFrame()
     while (frame) {
       await frame.evaluate(() => new Promise((resolve) => {
@@ -208,14 +212,14 @@ async function scrollIntoView(element, locator) {
         requestAnimationFrame(check)
       }))
       if (!frame.parentFrame()) break
-      await (await frame.frameElement()).waitForElementState('stable')
+      await (await frame.frameElement()).waitForElementState('stable', { signal })
       frame = frame.parentFrame()
     }
     // The page may replace the target while it scrolls, or remove or hide it, as a menu that closes on scroll does.
-    const target = await findTarget(locator).catch((error) => {
+    const target = await findTarget(locator, signal).catch((error) => {
       throw error.name === 'TimeoutError' ? new TraceframeError(`${locator} disappeared when it was scrolled into view.`, { code: 'FLOW_TARGET_MISSING', cause: error }) : error
     })
-    await target.element.waitForElementState('stable')
+    await target.element.waitForElementState('stable', { signal })
     const box = await target.element.boundingBox()
     if (!box) throw new TraceframeError(`Could not find ${locator}.`, { code: 'FLOW_TARGET_MISSING' })
     return { element: target.element, box }
