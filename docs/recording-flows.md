@@ -22,6 +22,8 @@ Inspect the running application at the recording viewport. Pick a short journey 
 
 Put setup and page readiness in `ready({ page, signal })`. This runs after initial navigation and before recording. Use `--storage-state` for an existing login, as below. For headers, locale, or themes, see [optional startup settings](#optional-startup-settings).
 
+If your script already owns the page or an extension context, use [`recordPage`](../README.md#record-a-page-you-already-opened) with an inline callback. Prepare the page before calling it; the caller owns navigation and browser cleanup.
+
 ## Save and switch login state
 
 Add `.auth/` to your project's `.gitignore`; saved state can grant access to the account. To create it interactively, install full Chromium and open Playwright's login window:
@@ -204,7 +206,7 @@ traceframe: [FLOW_FAILED] Expected the Saved status.
 
 Inspect the reported screenshot, then the capture near the reported time if needed. The time is measured from the first captured frame before diagnostic collection; it is not the raw file's duration. Correct the locator or application check and reset demo data before retrying.
 
-Only paths saved for the current attempt are reported. A closed or unresponsive page may prevent a screenshot or capture from being saved. Errors before the first frame have no recording time, and a flow timeout may have no source location. Without `--run-dir`, flow locations and timing are still reported when available, but temporary captures are removed and no failure screenshot is saved. The API exposes the same context through [`error.diagnostics`](../README.md#programmatic-usage).
+Only paths saved for the current attempt are reported. A closed or unresponsive page may prevent a screenshot or capture from being saved. Errors before the first frame have no recording time, and a flow timeout may have no source location. Without `--run-dir`, flow locations and timing are still reported when available, but temporary captures are removed and no failure screenshot is saved. The API exposes the same context through [`error.diagnostics`](../README.md#errors-and-cancellation).
 
 ## Edit the finished video
 

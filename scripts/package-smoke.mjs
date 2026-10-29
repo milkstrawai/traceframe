@@ -20,7 +20,7 @@ try {
   const examples = join(directory, 'node_modules', '@milkstraw', 'traceframe', 'examples')
   const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
   assert.equal((await run(bin, ['--version'])).stdout, `${version}\n`)
-  assert.equal((await run(process.execPath, ['--input-type=module', '-e', 'const { record } = await import("@milkstraw/traceframe"); console.log(typeof record)'], { cwd: directory })).stdout, 'function\n')
+  assert.equal((await run(process.execPath, ['--input-type=module', '-e', 'const { record, recordPage } = await import("@milkstraw/traceframe"); console.log(typeof record, typeof recordPage)'], { cwd: directory })).stdout, 'function function\n')
 
   const { stdout } = await run(bin, [
     'record', '--preset', 'draft',
@@ -32,7 +32,13 @@ try {
   assert.equal(summary.clickCount, 5)
   assert.equal(summary.moveCount, 6)
   await run('ffmpeg', ['-v', 'error', '-xerror', '-i', summary.output, '-f', 'null', '-'])
-  console.log(JSON.stringify({ package: filename, duration: summary.duration }))
+  const { stdout: pageOutput } = await run(process.execPath, [join(examples, 'existing-page.mjs'), join(directory, 'existing-page.mp4')], { cwd: directory })
+  const pageSummary = JSON.parse(pageOutput)
+  assert.equal(pageSummary.clickCount, 2)
+  assert.equal(pageSummary.width, 1280)
+  assert.equal(pageSummary.height, 800)
+  await run('ffmpeg', ['-v', 'error', '-xerror', '-i', pageSummary.output, '-f', 'null', '-'])
+  console.log(JSON.stringify({ package: filename, duration: summary.duration, existingPageDuration: pageSummary.duration }))
 } finally {
   await rm(directory, { recursive: true, force: true })
 }

@@ -26,6 +26,7 @@
   "files": [
     "src",
     "docs/recording-flows.md",
+    "examples/existing-page.mjs",
     "examples/recipes.html",
     "examples/recipes-flow.mjs"
   ],

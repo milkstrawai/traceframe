@@ -147,20 +147,57 @@ await record({
 })
 ```
 
+### Record a page you already opened
+
+Use `recordPage` when your script already owns a Playwright page, including a page in a persistent extension context. Prepare navigation, authentication, application readiness and fonts before calling it. With a prepared `page`:
+
+```js
+import { recordPage } from '@milkstraw/traceframe'
+
+const save = page.getByRole('button', { name: 'Save', exact: true })
+await recordPage({
+  page,
+  output: './recording.mp4',
+  flow: async ({ click, wait, signal }) => {
+    await click(save)
+    await page.getByText('Saved', { exact: true }).waitFor({ signal })
+    await wait(3)
+  },
+})
+```
+
+The callback receives the same `page`, `signal` and five helpers as a flow file. It can close over your script's locators and state. See the [runnable existing-page example](examples/existing-page.mjs); in a clone, run `node examples/existing-page.mjs` to save `.traceframe/existing-page.mp4` using synthetic local content.
+
+Use Playwright 1.64.1 with Chromium, a fixed viewport, 100% browser zoom and an unscaled page. Traceframe checks the page's inner dimensions and visual viewport before starting capture, rejecting unsupported geometry with `CAPTURE_SIZE_MISMATCH`. `recordPage` keeps the page, context and browser open on success, failure and cancellation. It does not navigate, resize, run a `ready` hook, or change page timeouts. Your script owns setup and shutdown. The CLI and `record` continue to create and close their own browser.
+
+`page` and a function `flow` are required. `output`, `postRoll`, `flowTimeout`, `runDirectory` and `signal` have the same meaning as in `record`, and the return value is the same recording summary. Set `initialPointer: { x, y }` to choose the starting cursor position. The page's viewport determines the dimensions; `scale` defaults to 1 and accepts 1 or 2, and `fps` defaults to 30 and accepts 30 or 60. Use these explicit settings instead of a preset. Browser setup options such as `url`, `browser`, `storageState`, viewport dimensions and `readyTimeout` are rejected.
+
+Traceframe moves the caller's pointer only after validating the first frame. To show the starting hover state from frame 0, move the page's mouse to your chosen `initialPointer` before calling `recordPage`.
+
+For 2× frames, launch the caller's browser with `chromium.launch({ args: ['--force-device-scale-factor=2'] })`, create its context with `deviceScaleFactor: 2`, and pass `scale: 2` to `recordPage`. The same launch argument works with `launchPersistentContext`. Setting `deviceScaleFactor` alone does not ensure 2× screencast frames. Traceframe checks the first JPEG's actual dimensions before running the callback and rejects mismatches with `CAPTURE_SIZE_MISMATCH`.
+
+Keep the viewport, zoom and visual scale fixed and the page open until `recordPage` settles; geometry is checked only at startup. Only that page is recorded; a tab closed during a take may lose its capture. Use the page exclusively for recording: concurrent screencasts, context `recordVideo` and tracing with screenshots can change frame dimensions or supply stale frames. A size check cannot detect every conflict. Overlapping `recordPage` calls on the same page reject with `PAGE_RECORDING_ACTIVE`.
+
+Await every helper. Helpers observe cancellation before further pointer or scroll actions, and release a mouse button that was already pressed; an already-issued action may still complete. Arbitrary callback code must cooperate with `signal`, including passing it to supported Playwright operations. A flow timeout does not forcibly terminate that code. Sequential takes are supported after a successful screencast stop, including ordinary flow failures and cooperative cancellation. If Playwright's FFmpeg is missing, Traceframe stops the partial capture before rejecting. Other startup or stop failures may need a new page or context; Traceframe leaves that recovery to the caller and does not stop a pre-existing caller screencast.
+
+Traceframe removes its own temporary outputs unless `runDirectory` is supplied. Playwright keeps original WebMs in its browser artifacts directory until the caller closes the browser, even after a take has been saved. For extension pages, use full Chromium; the headless shell alone does not load extensions. This path was checked on Linux with Playwright 1.64.1 and its bundled full Chromium using a synthetic extension.
+
+### Errors and cancellation
+
 Traceframe's own errors are `TraceframeError` instances (exported by the package) with a `code`, such as `READY_FAILED` or `FLOW_TARGET_OBSCURED`. Other exceptions thrown by the flow become `FLOW_FAILED`, with the original thrown value in `cause`; existing Traceframe error codes and causes are preserved.
 
 When available, `error.diagnostics` contains:
 
 | Field | Meaning |
 | --- | --- |
-| `flowLocations` | Locations in the supplied flow file, as `{ file, line, column }` objects with an absolute path and 1-based line/column. Empty when the error stack has no matching frame. |
+| `flowLocations` | Locations in the supplied flow file, as `{ file, line, column }` objects with an absolute path and 1-based line/column. Empty for a callback or when the error stack has no matching frame. |
 | `recordingTime` | Elapsed seconds from the first captured frame for a capture-stage failure, measured before collecting failure artifacts. Omitted before the first frame and for later rendering failures. |
 | `capturePath` | Absolute path to the retained raw capture, only when `runDirectory` was supplied and saving succeeded. |
 | `screenshotPath` | Absolute path to the saved failure screenshot, only when `runDirectory` was supplied and the screenshot succeeded. |
 
 A flow timeout may have no flow location because it is raised outside the blocked operation. Screenshots are best effort and have a five-second collection budget. Partial captures are saved before browser shutdown, with no fixed time limit so slower encoders can finish. Diagnostic failures do not replace the original error.
 
-Pass `signal` to stop a recording early. Traceframe closes the browser, stops FFmpeg, and removes its temporary files before rejecting with the signal's reason. When you pass a signal, Traceframe leaves Ctrl-C and other termination signals to you. The CLI does this for you: the first Ctrl-C stops and cleans up, and a second one exits at once.
+Pass `signal` to stop a recording early. Traceframe stops its recording/rendering work and removes its temporary files before rejecting with the signal's reason. `record` also closes its browser; `recordPage` leaves the caller's browser open. When you pass a signal, Traceframe leaves Ctrl-C and other termination signals to you. The CLI does this for you: the first Ctrl-C stops and cleans up, and a second one exits at once.
 
 A stuck recording encoder can delay saving and cancellation indefinitely. A second Ctrl-C forces the CLI to exit and can discard the unfinished capture. API callers that need a hard shutdown deadline should run recording in a separate process they can terminate.
 
