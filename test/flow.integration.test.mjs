@@ -21,6 +21,56 @@ async function withPage(html, run) {
   }
 }
 
+for (const action of ['hover', 'click', 'scroll']) {
+  test(`${action} releases replaced targets and temporary iframe handles`, { timeout: 30_000 }, async () => {
+    await withPage('<iframe style="display:block;margin-top:1200px;width:400px;height:200px"></iframe>', async ({ page, api }) => {
+      const frame = page.frames().find(frame => frame.parentFrame())
+      await frame.setContent(`
+        <div id="panel" style="height:100px;overflow:auto"><button style="margin-top:600px">Save</button></div>
+        <script>
+          window.targets = [new WeakRef(document.querySelector('button'))]
+          panel.addEventListener('scroll', () => {
+            const button = document.querySelector('button')
+            const replacement = button.cloneNode(true)
+            targets.push(new WeakRef(replacement))
+            button.replaceWith(replacement)
+          }, { once: true })
+        </script>
+      `)
+      await api[action](frame.getByRole('button'), { duration: 0.01, dwell: 0 })
+      await frame.evaluate(() => document.querySelector('button').remove())
+      // Let Chromium finish the rendering lifecycle for the removed nodes before collecting them.
+      await page.evaluate(() => new Promise(requestAnimationFrame))
+      const cdp = await page.context().newCDPSession(page)
+      await cdp.send('HeapProfiler.collectGarbage')
+      assert.deepEqual(await frame.evaluate(() => targets.map(ref => Boolean(ref.deref()))), [false, false])
+      await page.evaluate(() => {
+        const iframe = document.querySelector('iframe')
+        window.removedFrame = new WeakRef(iframe)
+        iframe.remove()
+      })
+      await page.evaluate(() => new Promise(requestAnimationFrame))
+      await cdp.send('HeapProfiler.collectGarbage')
+      assert.equal(await page.evaluate(() => Boolean(removedFrame.deref())), false)
+    })
+  })
+}
+
+test('a failed click releases its target', { timeout: 30_000 }, async () => {
+  await withPage('<button>Save</button><div style="position:fixed;inset:0"></div>', async ({ page, api }) => {
+    await assert.rejects(api.click(page.getByRole('button'), { duration: 0.01, dwell: 0 }), { code: 'FLOW_TARGET_OBSCURED' })
+    await page.evaluate(() => {
+      const button = document.querySelector('button')
+      window.target = new WeakRef(button)
+      button.remove()
+    })
+    await page.evaluate(() => new Promise(requestAnimationFrame))
+    const cdp = await page.context().newCDPSession(page)
+    await cdp.send('HeapProfiler.collectGarbage')
+    assert.equal(await page.evaluate(() => Boolean(target.deref())), false)
+  })
+})
+
 test('clicks visible targets in offset iframes and open shadow roots', { timeout: 30_000 }, async () => {
   await withPage(`
     <iframe style="position:absolute;left:300px;top:200px;width:220px;height:100px" srcdoc="<button onclick='this.textContent = &quot;Frame clicked&quot;'>Frame action</button>"></iframe>

@@ -16,40 +16,59 @@ export function createConfig(options = {}) {
     width: options.viewportWidth ?? preset.viewport.width,
     height: options.viewportHeight ?? preset.viewport.height,
   }
+  check(options.flow, 'A flow file is required (the flow option, or --flow).')
+  check(options.url, 'A URL is required (the url option, or --url).')
+  const readyTimeout = options.readyTimeout ?? 30
+  check(Number.isFinite(readyTimeout) && readyTimeout > 0, 'Ready timeout must be more than 0 seconds.')
+
+  return {
+    ...recordingConfig(options, viewport, preset),
+    url: options.url,
+    flow: resolve(options.flow),
+    storageState: options.storageState,
+    browser: options.browser ?? process.env.CHROME_PATH,
+    readyTimeout,
+  }
+}
+
+export function createPageConfig(options = {}) {
+  const { page } = options
+  check(typeof page?.viewportSize === 'function' && page.screencast, 'A Playwright Page with screencast support is required.')
+  check(!page.isClosed(), 'The supplied page is closed.')
+  const viewport = page.viewportSize()
+  check(viewport, 'recordPage requires a fixed viewport. Set it when creating the page or context; viewport: null is not supported.')
+  for (const key of ['url', 'browser', 'storageState', 'readyTimeout', 'viewportWidth', 'viewportHeight', 'preset']) {
+    check(options[key] === undefined, `recordPage does not accept ${key}; prepare the page before recording and use scale/fps for video settings.`)
+  }
+  return recordingConfig(options, viewport, { scale: 1, fps: 30 })
+}
+
+function recordingConfig(options, viewport, defaults) {
   check(Number.isInteger(viewport.width) && viewport.width > 0, 'Viewport width must be a positive integer.')
   check(Number.isInteger(viewport.height) && viewport.height > 0, 'Viewport height must be a positive integer.')
-  const scale = options.scale ?? preset.scale
+  const scale = options.scale ?? defaults.scale
   check(scale === 1 || scale === 2, 'Scale must be 1 or 2.')
   const video = {
     width: viewport.width * scale,
     height: viewport.height * scale,
-    fps: options.fps ?? preset.fps,
+    fps: options.fps ?? defaults.fps,
   }
   check(video.fps === 30 || video.fps === 60, 'FPS must be 30 or 60.')
   check(video.width % 2 === 0 && video.height % 2 === 0, 'At scale 1, the viewport width and height must be even.')
 
-  check(options.flow, 'A flow file is required (the flow option, or --flow).')
-  check(options.url, 'A URL is required (the url option, or --url).')
   const output = resolve(options.output ?? 'traceframe.mp4')
   check(output.toLowerCase().endsWith('.mp4'), 'Output path must use the .mp4 extension.')
   const postRoll = options.postRoll ?? 0.3
   check(Number.isFinite(postRoll) && postRoll >= 0, 'Post-roll must be 0 or more seconds.')
-  const readyTimeout = options.readyTimeout ?? 30
-  check(Number.isFinite(readyTimeout) && readyTimeout > 0, 'Ready timeout must be more than 0 seconds.')
   const flowTimeout = options.flowTimeout ?? 120
   check(Number.isFinite(flowTimeout) && flowTimeout > 0, 'Flow timeout must be more than 0 seconds.')
 
   return {
-    url: options.url,
-    flow: resolve(options.flow),
     output,
-    storageState: options.storageState,
-    browser: options.browser ?? process.env.CHROME_PATH,
-    viewport,
+    viewport: { ...viewport },
     video,
     scale,
     postRoll,
-    readyTimeout,
     flowTimeout,
     runDirectory: options.runDirectory ? resolve(options.runDirectory) : undefined,
   }

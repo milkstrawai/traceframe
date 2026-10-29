@@ -87,3 +87,9 @@ test('omits unavailable diagnostics and keeps ordinary usage errors concise', ()
   error.diagnostics = { flowLocations: [] }
   assert.equal(formatFailure(error), 'traceframe: [READY_FAILED] not ready\n')
 })
+
+test('callback errors retain timing and artifacts without inventing source locations', async () => {
+  const error = new Error('callback failed')
+  await addDiagnostics(error, { recordingTime: 0.4, capturePath: '/example/capture.webm' })
+  assert.deepEqual(error.diagnostics, { flowLocations: [], recordingTime: 0.4, capturePath: '/example/capture.webm' })
+})

@@ -2,12 +2,15 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import { createConfig } from './config.mjs'
+import { createConfig, createPageConfig } from './config.mjs'
 import { captureFlow } from './capture.mjs'
 import { addDiagnostics, retainedFile } from './diagnostics.mjs'
 import { probeFfmpeg } from './ffmpeg.mjs'
-import { loadFlow } from './flow.mjs'
+import { createFlow, loadFlow } from './flow.mjs'
 import { renderVideo } from './render.mjs'
+import { TraceframeError } from './errors.mjs'
+
+const activePages = new WeakSet()
 
 export async function record(options = {}) {
   const { signal } = options
@@ -17,6 +20,25 @@ export async function record(options = {}) {
   const flow = await loadFlow(config.flow, config.viewport).catch(async (error) => {
     throw await addDiagnostics(error, { flow: config.flow })
   })
+  return recordFlow({ config, flow, ffmpeg, signal })
+}
+
+export async function recordPage(options = {}) {
+  const { page, signal } = options
+  signal?.throwIfAborted()
+  const config = createPageConfig(options)
+  const flow = createFlow(options.flow, config.viewport, options.initialPointer)
+  if (activePages.has(page)) throw new TraceframeError('This page is already being recorded by Traceframe.', { code: 'PAGE_RECORDING_ACTIVE' })
+  activePages.add(page)
+  try {
+    const ffmpeg = await probeFfmpeg()
+    return await recordFlow({ config, flow, ffmpeg, signal, page })
+  } finally {
+    activePages.delete(page)
+  }
+}
+
+async function recordFlow({ config, flow, ffmpeg, signal, page }) {
   await mkdir(dirname(config.output), { recursive: true })
   const directory = config.runDirectory ?? await mkdtemp(join(tmpdir(), 'traceframe-'))
   await mkdir(directory, { recursive: true })
@@ -24,7 +46,7 @@ export async function record(options = {}) {
   let capture
   let failed = false
   try {
-    capture = await captureFlow({ config, flow, directory, signal })
+    capture = await captureFlow({ config, flow, directory, signal, page })
     const { rawPath, trace } = capture
     const duration = await renderVideo({ rawPath, trace, directory, config, ffmpeg, signal })
     return {

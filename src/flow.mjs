@@ -22,11 +22,16 @@ export async function loadFlow(path, viewport) {
     throw new TraceframeError(`Could not load flow: ${path}: ${error instanceof Error ? error.message : error}`, { code: 'INVALID_FLOW', cause: error })
   }
   if (typeof module.default !== 'function') throw new TraceframeError('Flow must export a default function.', { code: 'INVALID_FLOW' })
-  const { x, y } = module.initialPointer ?? { x: Math.round(viewport.width / 4), y: Math.max(0, viewport.height - 80) }
+  return { ...createFlow(module.default, viewport, module.initialPointer), ready: module.ready }
+}
+
+export function createFlow(run, viewport, initialPointer) {
+  if (typeof run !== 'function') throw new TraceframeError('Flow must be a function.', { code: 'INVALID_FLOW' })
+  const { x, y } = initialPointer ?? { x: Math.round(viewport.width / 4), y: Math.max(0, viewport.height - 80) }
   if (!insideViewport({ x, y }, viewport)) {
     throw new TraceframeError('Flow initialPointer must be a point inside the viewport.', { code: 'INVALID_FLOW' })
   }
-  return { run: module.default, ready: module.ready, initialPointer: { x, y } }
+  return { run, initialPointer: { x, y } }
 }
 
 // Events are timed in seconds from `clock`, the epoch milliseconds of the first video frame.
@@ -55,14 +60,14 @@ export function createFlowApi({ page, trace, clock, viewport, signal }) {
     pointer = to
   }
 
-  const moveTo = async (locator, duration, name) => {
+  const moveTo = async (locator, duration, name, handles) => {
     const seconds = durationSeconds(duration ?? MOVE_SECONDS, `${name} duration`)
-    const target = await findTarget(locator, signal)
+    const target = await findTarget(locator, signal, handles)
     // A person does not chase a target that shifts under a pointer already on it.
     if (pointInsideBox(pointer, target.box)) return pointer
     let point = await aimPoint(target)
     if (!insideViewport(point, viewport)) {
-      const aim = await reveal(target.element, locator, signal)
+      const aim = await reveal(target.element, locator, signal, handles)
       if (!aim.visible) throw new TraceframeError(`${locator} could not be revealed by scrolling.`, { code: 'FLOW_TARGET_OUTSIDE_VIEWPORT' })
       point = aim.point
     }
@@ -75,20 +80,21 @@ export function createFlowApi({ page, trace, clock, viewport, signal }) {
   }
 
   return {
-    async hover(locator, options = {}) {
-      await moveTo(locator, options.duration, 'hover')
-    },
-    async click(locator, options = {}) {
+    hover: withHandles(async (handles, locator, options = {}) => {
+      await moveTo(locator, options.duration, 'hover', handles)
+    }),
+    click: withHandles(async (handles, locator, options = {}) => {
       assertBelowLimit(trace.clicks, LIMITS.maxClicks, 'click')
       const dwell = durationSeconds(options.dwell ?? DWELL_SECONDS, 'click dwell', { allowZero: true })
-      const point = await moveTo(locator, options.duration, 'click')
+      const point = await moveTo(locator, options.duration, 'click', handles)
       await sleep(dwell * 1000)
       // Hold on to this element: a control may rename or hide itself once it is pressed.
       const element = await locator.elementHandle({ signal })
+      handles.push(element)
       await element.waitForElementState('enabled', { signal }).catch((error) => {
         throw error.name === 'TimeoutError' ? new TraceframeError(`${locator} stayed disabled.`, { code: 'FLOW_TARGET_DISABLED', cause: error }) : error
       })
-      await assertReceivesPointer(element, locator, point)
+      await assertReceivesPointer(element, locator, point, handles)
       const at = secondsSince(clock)
       signal?.throwIfAborted()
       await page.mouse.down()
@@ -104,20 +110,32 @@ export function createFlowApi({ page, trace, clock, viewport, signal }) {
         await page.mouse.up()
       }
       trace.clicks.push({ at, point })
-    },
+    }),
     async move(point, options = {}) {
       if (!insideViewport(point, viewport)) {
         throw new TraceframeError('move requires an { x, y } point inside the viewport.', { code: 'INVALID_FLOW' })
       }
       await movePointer(point, durationSeconds(options.duration ?? MOVE_SECONDS, 'move duration'))
     },
-    async scroll(locator) {
-      const { shown } = await reveal((await findTarget(locator, signal)).element, locator, signal)
+    scroll: withHandles(async (handles, locator) => {
+      const { shown } = await reveal((await findTarget(locator, signal, handles)).element, locator, signal, handles)
       if (!shown) throw new TraceframeError(`${locator} could not be revealed by scrolling.`, { code: 'FLOW_TARGET_OUTSIDE_VIEWPORT' })
-    },
+    }),
     async wait(seconds) {
       await sleep(durationSeconds(seconds, 'wait', { allowZero: true }) * 1000)
     },
+  }
+}
+
+// A helper may outlive a cancelled recording; release its handles when that helper actually settles.
+function withHandles(run) {
+  return async (...args) => {
+    const handles = []
+    try {
+      return await run(handles, ...args)
+    } finally {
+      await Promise.all(handles.map(handle => handle.dispose().catch(() => {})))
+    }
   }
 }
 
@@ -148,9 +166,10 @@ function assertBelowLimit(events, limit, type) {
   }
 }
 
-async function findTarget(locator, signal) {
+async function findTarget(locator, signal, handles) {
   await locator.waitFor({ signal })
   const element = await locator.elementHandle({ signal })
+  handles.push(element)
   const box = await element.boundingBox()
   if (!box) throw new TraceframeError(`Could not find ${locator}.`, { code: 'FLOW_TARGET_MISSING' })
   return { element, box }
@@ -171,10 +190,10 @@ async function aimPoint({ element, box }) {
   return { x: box.x + offset.x * box.width, y: box.y + offset.y * box.height }
 }
 
-async function reveal(element, locator, signal) {
+async function reveal(element, locator, signal, handles) {
   // Content that loads above the target during the scroll can push it out again.
   for (let attempt = 0; attempt < 2; attempt++) {
-    const target = await scrollIntoView(element, locator, signal)
+    const target = await scrollIntoView(element, locator, signal, handles)
     const point = await aimPoint(target)
     const visibility = await target.element.evaluate((node, offset) => new Promise((resolve) => {
       new IntersectionObserver(([entry], observer) => {
@@ -194,7 +213,7 @@ async function reveal(element, locator, signal) {
 
 // Awaiting the scroll waits for a scrolling panel. Chromium resolves a page scroll before it stops, and a sticky target
 // or iframe can stay put while its page scrolls, so also wait for every enclosing page to stop.
-async function scrollIntoView(element, locator, signal) {
+async function scrollIntoView(element, locator, signal, handles) {
   signal?.throwIfAborted()
   await element.evaluate((target) => target.scrollIntoView({ behavior: 'smooth', block: 'center' }))
   try {
@@ -212,11 +231,13 @@ async function scrollIntoView(element, locator, signal) {
         requestAnimationFrame(check)
       }))
       if (!frame.parentFrame()) break
-      await (await frame.frameElement()).waitForElementState('stable', { signal })
+      const frameElement = await frame.frameElement()
+      handles.push(frameElement)
+      await frameElement.waitForElementState('stable', { signal })
       frame = frame.parentFrame()
     }
     // The page may replace the target while it scrolls, or remove or hide it, as a menu that closes on scroll does.
-    const target = await findTarget(locator, signal).catch((error) => {
+    const target = await findTarget(locator, signal, handles).catch((error) => {
       throw error.name === 'TimeoutError' ? new TraceframeError(`${locator} disappeared when it was scrolled into view.`, { code: 'FLOW_TARGET_MISSING', cause: error }) : error
     })
     await target.element.waitForElementState('stable', { signal })
@@ -228,7 +249,7 @@ async function scrollIntoView(element, locator, signal) {
   }
 }
 
-async function assertReceivesPointer(element, locator, point) {
+async function assertReceivesPointer(element, locator, point, handles) {
   const box = await element.boundingBox()
   if (!box || !pointInsideBox(point, box)) {
     throw new TraceframeError(`${locator} moved before the click.`, { code: 'FLOW_TARGET_MOVED' })
@@ -242,15 +263,16 @@ async function assertReceivesPointer(element, locator, point) {
     }
     return false
   }, relativePoint(point, box))
-  if (!receivesPointer || !(await framesReceivePointer(element, point))) {
+  if (!receivesPointer || !(await framesReceivePointer(element, point, handles))) {
     throw new TraceframeError(`${locator} is covered at the click point. If a dialog or toast covers it, wait until it closes; if a panel clips it or a sticky header or bar covers it, call scroll() on the target first.`, { code: 'FLOW_TARGET_OBSCURED' })
   }
 }
 
-async function framesReceivePointer(element, point) {
+async function framesReceivePointer(element, point, handles) {
   let frame = await element.ownerFrame()
   while (frame?.parentFrame()) {
     const frameElement = await frame.frameElement()
+    handles.push(frameElement)
     const box = await frameElement.boundingBox()
     if (!box) return false
     const hit = await frameElement.evaluate((target, { x, y }) => {

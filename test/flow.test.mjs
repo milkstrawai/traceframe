@@ -22,6 +22,7 @@ function setup() {
 // A target whose box depends on the phase: before the pointer moves, after it arrives, just before the click, and while pressed.
 function target(page, { start = box, arrived = start, beforeClick = arrived, pressed = beforeClick, enabledError, receivesPointer = true } = {}) {
   const element = {
+    async dispose() {},
     async boundingBox() { return page.mouse.downAt !== undefined ? pressed : page.mouse.moves.length ? beforeClick : start },
     async waitForElementState() { if (enabledError) throw enabledError },
     // The hit test passes the point to check; aiming passes nothing.
