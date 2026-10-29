@@ -2,6 +2,8 @@
 
 Traceframe records a scripted Chromium flow and renders an MP4 with a smooth cursor and click pulse. Everything runs locally: pages, flows, videos, and authentication state stay on your machine.
 
+Recordings are silent; audio is not captured.
+
 https://github.com/user-attachments/assets/38e02cd5-a9ba-4f3c-938c-159955353141
 
 ## Prerequisites
@@ -16,7 +18,7 @@ To use system Chrome 150 or later, pass `--browser` or set `CHROME_PATH`, and in
 
 In a sandbox, such as a coding agent's, allow Playwright's browser download and let Chromium start.
 
-To record pages behind a login, pass a Playwright storage-state file with `--storage-state`. Keep it in `.auth/` or another ignored location.
+To record pages behind a login, pass a Playwright storage-state file with `--storage-state`. See [creating saved login state and switching accounts](docs/recording-flows.md#save-and-switch-login-state), and keep state in `.auth/` or another ignored location.
 
 ## Record a video
 
@@ -51,7 +53,7 @@ npx @milkstraw/traceframe record \
   --preset draft
 ```
 
-The [recording guide](docs/recording-flows.md) includes a runnable example and recipes for form input, asynchronous results, browser settings, and editing or sharing a recording.
+The [recording guide](docs/recording-flows.md) includes a runnable example and recipes for authentication, form input, asynchronous results, captions, browser settings, and inspecting, editing or sharing a recording.
 
 Both presets use a 1280×800 CSS viewport. `draft` produces 1280×800 at 30 FPS; `standard` (the default) produces 2560×1600 at 60 FPS. The output dimensions are the viewport times `--scale`, so `--preset draft --scale 2` gives 2560×1600 at 30 FPS. The command prints a JSON summary when it finishes.
 

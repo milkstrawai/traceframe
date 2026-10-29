@@ -20,7 +20,46 @@ In a repository clone, run `npx traceframe record --url "file://$PWD/examples/re
 
 Inspect the running application at the recording viewport. Pick a short journey with a visible result and known demo data. Use role, label, or test-id locators; `locator.describe()` can make errors clearer.
 
-Put setup and page readiness in `ready({ page, signal })`. This runs after initial navigation and before recording. Use `--storage-state` for an existing login, and keep that file in an ignored directory. For headers, locale, or themes, see [optional startup settings](#optional-startup-settings).
+Put setup and page readiness in `ready({ page, signal })`. This runs after initial navigation and before recording. Use `--storage-state` for an existing login, as below. For headers, locale, or themes, see [optional startup settings](#optional-startup-settings).
+
+## Save and switch login state
+
+Add `.auth/` to your project's `.gitignore`; saved state can grant access to the account. To create it interactively, install full Chromium and open Playwright's login window:
+
+```sh
+mkdir -p .auth
+npx playwright@1.64.1 install chromium
+npx playwright@1.64.1 codegen --save-storage=.auth/first-account.json http://localhost:3000
+```
+
+Sign in normally, wait for the authenticated screen, then close the browser window to save the state. This requires a desktop/display; the headless-shell-only installation used for recording is insufficient. Record with the same application origin, including its port:
+
+```sh
+npx @milkstraw/traceframe record \
+  --url http://localhost:3000 --flow ./flow.mjs \
+  --storage-state .auth/first-account.json --out ./recording.mp4
+```
+
+If a Playwright script already signs in, save state after checking that login finished and before closing its browser:
+
+```js
+await page.getByRole('heading', { name: 'Example workspace' }).waitFor()
+await page.context().storageState({ path: '.auth/first-account.json', indexedDB: true })
+```
+
+Storage state includes cookies and local storage. The scripted `indexedDB: true` also saves IndexedDB, which some apps use for authentication; the codegen command above does not include it.
+
+For a second account, save a separate file from a fresh login. To switch during a flow, first navigate the recorded page to `about:blank` to release its open IndexedDB connections. Apply the second account with Playwright 1.64.1's `setStorageState`, then return to the app on that same page and verify the account:
+
+```js
+await page.goto('about:blank')
+await page.context().setStorageState('.auth/second-account.json')
+await page.goto('http://localhost:3000')
+await page.getByRole('heading', { name: 'Second account' }).waitFor()
+await page.evaluate(() => document.fonts.ready)
+```
+
+Replace the URL and headings with your application's account-specific checks. `setStorageState` replaces cookies and origin storage, including local storage and IndexedDB, rather than just adding cookies. Neither saving nor replacing storage state handles `sessionStorage`; if the app uses it for authentication, restore or clear it separately for the relevant origins and follow the app's login requirements. Opening a replacement page would leave Traceframe recording the original page.
 
 ## Choose the right actions
 
@@ -121,11 +160,35 @@ Use `--preset draft` while writing the flow and the default preset for the final
 
 While writing the flow, pass `--run-dir` with an ignored folder, such as `.traceframe/runs/demo`. Use a separate directory for each take. A failed take keeps its partial `capture.webm` when saving succeeds and attempts a viewport screenshot, `failure.png`. The raw capture has no added cursor overlay and may include repeated final frames after the failure time.
 
-A failed take may already have submitted real jobs, so reset demo data before recording again. Check the important transitions and the final result. You can also check the file for decode errors:
+A failed take may already have submitted real jobs, so reset demo data before recording again. Check the finished file for decode errors:
 
 ```sh
 ffmpeg -v error -xerror -i ./recording.mp4 -f null -
 ```
+
+For a visual overview of the whole recording, sample roughly every two seconds into numbered contact sheets. Add `.traceframe/` to your project's `.gitignore` and use a new inspection directory for each take:
+
+```sh
+mkdir -p .traceframe/review/take-1
+ffmpeg -i ./recording.mp4 \
+  -vf "select='isnan(prev_selected_t)+gte(t-prev_selected_t,2)',scale=640:-1,drawtext=text='%{pts\:hms}':x=8:y=8:fontsize=20:fontcolor=white:box=1:boxcolor=black@0.6,tile=4x5:padding=4" \
+  -fps_mode vfr .traceframe/review/take-1/sheet-%03d.png
+```
+
+Each sheet holds 20 timestamped samples, covering about 40 seconds. The command continues through the entire input; the last sheet may have empty cells. Do not add `-frames:v 1`, which would stop after the first sheet.
+
+On FFmpeg 5.0, replace `-fps_mode vfr` with `-vsync vfr`.
+
+Timestamp labels require FFmpeg's `drawtext` filter and an available font. Homebrew's current standard `ffmpeg` omits that filter; run `brew install ffmpeg-full` and use `"$(brew --prefix ffmpeg-full)/bin/ffmpeg"` in place of `ffmpeg` in the command above. If `drawtext` is available but no default font is found, add `fontfile=/path/to/font.ttf:` before `text=`.
+
+Inspect every sheet, then extract important results, account changes and transitions at the video's full resolution. For example, inspect the frame at 12.4 seconds:
+
+```sh
+ffmpeg -ss 00:00:12.400 -i ./recording.mp4 \
+  -frames:v 1 -update 1 .traceframe/review/take-1/detail-12.400.png
+```
+
+Small text, focus rings and brief glitches can disappear in the reduced samples. Extract nearby frames around a suspicious transition and check caption reading pauses, pointer motion and result holds against the flow's timing. Contact sheets and successful decoding alone do not establish readable pacing or smooth motion. An agent preparing a demonstration should complete these checks before presenting it for the human's feature review.
 
 ## Diagnose a failed take
 
