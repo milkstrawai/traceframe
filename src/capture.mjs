@@ -65,7 +65,7 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
     // A failed stop must not be retried: Playwright may still be waiting to finish its artifact.
     recording = false
     await page.screencast.stop()
-    return { rawPath, trace }
+    return { rawPath, trace, startedAt: clock }
   } catch (error) {
     failed = true
     const recordingTime = clock === undefined ? undefined : Math.max(0, (Date.now() - clock) / 1000)

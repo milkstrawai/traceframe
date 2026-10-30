@@ -24,8 +24,10 @@ const OPTION_KEYS = {
   'ready-timeout': 'readyTimeout',
   'flow-timeout': 'flowTimeout',
   'run-dir': 'runDirectory',
+  audio: 'audio',
+  'audio-offset': 'audioOffset',
 }
-const NUMBER_KEYS = new Set(['viewportWidth', 'viewportHeight', 'scale', 'fps', 'postRoll', 'readyTimeout', 'flowTimeout'])
+const NUMBER_KEYS = new Set(['viewportWidth', 'viewportHeight', 'scale', 'fps', 'postRoll', 'readyTimeout', 'flowTimeout', 'audioOffset'])
 const HELP = `traceframe ${VERSION}
 
 Record a scripted Chromium flow and render a smooth cursor and click pulse.
@@ -46,6 +48,8 @@ Options:
   --ready-timeout <seconds>    Playwright default timeout during navigation and ready() (default: 30)
   --flow-timeout <seconds>     Time limit for the flow, including waits (default: 120)
   --run-dir <path>             Keep the raw capture, failure screenshot and FFmpeg filter
+  --audio <path>               Add an external audio file (AAC stereo in the MP4)
+  --audio-offset <seconds>     Audio start in the video; negative trims its start (default: 0)
   -h, --help                   Show this help
   -v, --version                Show the version
 
@@ -107,6 +111,10 @@ function parseCommand(args) {
   const options = {}
   for (const [name, key] of Object.entries(OPTION_KEYS)) {
     if (values[name] !== undefined) options[key] = NUMBER_KEYS.has(key) ? Number(values[name]) : values[name]
+  }
+  if (options.audio !== undefined || options.audioOffset !== undefined) {
+    options.audio = { path: options.audio, offset: options.audioOffset }
+    delete options.audioOffset
   }
   return { options }
 }

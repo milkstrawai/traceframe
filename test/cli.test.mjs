@@ -34,3 +34,11 @@ test('passes --out and numeric options through to the configuration', async () =
   // A string timeout would fail the config check, so reaching the flow loader proves the number conversion.
   assert.match((await run('record', '--url', 'file:///tmp/page.html', '--flow', 'missing-flow.mjs', '--flow-timeout', '300')).stderr, /Could not load flow/)
 })
+
+test('parses audio settings and explains incomplete or invalid offsets', async () => {
+  const help = await run('--help')
+  assert.match(help.stdout, /--audio <path>/)
+  assert.match(help.stdout, /--audio-offset <seconds>/)
+  assert.match((await run('record', ...flowArgs, '--audio-offset', '1')).stderr, /Audio must specify a local file path/)
+  assert.match((await run('record', ...flowArgs, '--audio', 'sound.wav', '--audio-offset', 'never')).stderr, /Audio offset must be a finite number/)
+})

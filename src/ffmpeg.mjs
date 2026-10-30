@@ -1,11 +1,12 @@
 import { execFile } from 'node:child_process'
+import { stat } from 'node:fs/promises'
 import { promisify } from 'node:util'
 
 import { TraceframeError } from './errors.mjs'
 
 const execFileAsync = promisify(execFile)
 
-export async function probeFfmpeg() {
+export async function probeFfmpeg({ audio = false } = {}) {
   const version = await runCommand('ffmpeg', ['-version'])
   const major = parseFfmpegMajor(version.stdout)
   if (!(major >= 5)) {
@@ -15,12 +16,27 @@ export async function probeFfmpeg() {
   if (!codecs.stdout.includes('libx264')) {
     throw new TraceframeError('System FFmpeg does not provide the libx264 encoder.', { code: 'FFMPEG_UNSUPPORTED' })
   }
+  if (audio && !/^\s*A\S*\s+aac\s/m.test(codecs.stdout)) {
+    throw new TraceframeError('System FFmpeg does not provide the AAC encoder required for audio.', { code: 'FFMPEG_UNSUPPORTED' })
+  }
   await runCommand('ffprobe', ['-version'])
   return { filterComplexFileOption: filterComplexFileOption(major) }
 }
 
-export async function probeDuration(path, signal) {
-  const { stdout } = await runCommand('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', path], { signal })
+export async function probeAudio(path, signal) {
+  try {
+    if (!(await stat(path)).isFile()) throw new Error('The input is not a regular file.')
+    const { stdout } = await runCommand('ffprobe', ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=index', '-of', 'json', path], { signal })
+    const { streams } = JSON.parse(stdout)
+    if (!streams.length) throw new Error('The file has no audio stream.')
+  } catch (cause) {
+    signal?.throwIfAborted()
+    throw new TraceframeError(`Could not read audio from ${path}: ${cause.message}`, { code: 'AUDIO_INVALID', cause })
+  }
+}
+
+export async function probeVideoDuration(path, signal) {
+  const { stdout } = await runCommand('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=duration', '-of', 'csv=p=0', path], { signal })
   return Number(stdout)
 }
 

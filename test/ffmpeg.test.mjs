@@ -1,7 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
-import { filterComplexFileOption, parseFfmpegMajor, runCommand } from '../src/ffmpeg.mjs'
+import { filterComplexFileOption, parseFfmpegMajor, probeAudio, runCommand } from '../src/ffmpeg.mjs'
 
 const banner = (version, libavutil) => `ffmpeg version ${version} Copyright (c) 2000-2025 the FFmpeg developers\nbuilt with gcc 14\nlibavutil      ${libavutil} / ${libavutil}\n`
 
@@ -32,6 +35,21 @@ test('explains how to install FFmpeg when the command is missing', async () => {
     code: 'FFMPEG_MISSING',
     message: /traceframe-missing-ffmpeg was not found\. Install FFmpeg 5 or newer/,
   })
+})
+
+test('rejects FIFO audio before ffprobe can wait for a writer', { timeout: 10_000, skip: process.platform === 'win32' }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'traceframe-audio-fifo-'))
+  try {
+    const input = join(directory, 'audio.pipe')
+    const signal = AbortSignal.timeout(2_000)
+    await runCommand('mkfifo', [input], { signal })
+    await assert.rejects(probeAudio(input, signal), {
+      code: 'AUDIO_INVALID',
+      message: /not a regular file/,
+    })
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })
 
 test('waits for an aborted command to exit before rejecting', async () => {

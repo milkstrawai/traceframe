@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
+import { resolve } from 'node:path'
 
 import { createConfig, createPageConfig } from '../src/config.mjs'
 
@@ -59,5 +60,21 @@ test('existing-page settings reject implicit browser setup and unfixed viewports
   assert.throws(() => createPageConfig({ page: { ...page, isClosed: () => true } }), /closed/)
   for (const key of ['url', 'browser', 'storageState', 'readyTimeout', 'viewportWidth', 'viewportHeight', 'preset']) {
     assert.throws(() => createPageConfig({ page, [key]: 'unused' }), { code: 'INVALID_CONFIG', message: new RegExp(`does not accept ${key}`) })
+  }
+})
+
+test('both recording paths normalize external audio with an explicit offset', () => {
+  for (const configure of [(options) => createConfig({ ...base, ...options }), (options) => createPageConfig({ page, ...options })]) {
+    assert.deepEqual(configure({ audio: { path: 'sound.wav' } }).audio, { path: resolve('sound.wav'), offset: 0 })
+    assert.deepEqual(configure({ audio: { path: 'sound.wav', offset: -0.125 } }).audio, { path: resolve('sound.wav'), offset: -0.125 })
+    const audio = () => ({ path: 'sound.wav' })
+    assert.equal(configure({ audio }).audio, audio)
+    for (const invalid of [null, true, 'sound.wav', {}, { path: '' }, { path: 4 }, { path: 'sound.wav', offset: '1' }, { path: 'sound.wav', offset: NaN }, { path: 'sound.wav', offset: Infinity }]) {
+      assert.throws(() => configure({ audio: invalid }), { code: 'INVALID_CONFIG' })
+    }
+    assert.throws(() => configure({ output: 'same.mp4', audio: { path: 'same.mp4' } }), /different paths/)
+    for (const name of ['capture.webm', 'render.filter', 'failure.png']) {
+      assert.throws(() => configure({ runDirectory: 'take', audio: { path: `take/${name}` } }), /reserved recording file/)
+    }
   }
 })

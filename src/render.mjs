@@ -2,7 +2,7 @@ import { rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
-import { probeDuration, runCommand } from './ffmpeg.mjs'
+import { probeVideoDuration, runCommand } from './ffmpeg.mjs'
 import { TraceframeError } from './errors.mjs'
 
 const ASSETS = join(import.meta.dirname, 'assets')
@@ -13,11 +13,14 @@ const CLICK = { duration: 0.24, scaleStart: 0.7, scaleEnd: 1.25 }
 // format=yuv444 places overlays on whole pixels. The default yuv420 snaps them to even pixels, and RGB costs more for the same result.
 const OVERLAY = 'eof_action=pass:format=yuv444'
 
-export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, signal }) {
+export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, signal, audio }) {
   const { fps } = config.video
   const outputDuration = Math.max(trace.end + config.postRoll, ...trace.clicks.map((click) => click.at + CLICK.duration))
+  if (audio && audio.offset >= outputDuration) {
+    throw new TraceframeError(`Audio offset ${audio.offset} seconds starts at or after the video's end (${number(outputDuration)} seconds). Reduce its offset.`, { code: 'AUDIO_OUTSIDE_VIDEO' })
+  }
   const filterPath = join(directory, 'render.filter')
-  await writeFile(filterPath, buildFilterScript({ trace, scale: config.scale }))
+  await writeFile(filterPath, buildFilterScript({ trace, scale: config.scale, audio }))
   const outputTemp = join(dirname(config.output), `.traceframe-${randomUUID()}.tmp.mp4`)
   const args = [
     '-y', '-hide_banner', '-loglevel', 'error',
@@ -25,9 +28,13 @@ export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, s
     '-loop', '1', '-framerate', String(fps), '-i', join(ASSETS, `cursor-${config.scale}x.png`),
   ]
   if (trace.clicks.length) args.push('-loop', '1', '-framerate', String(fps), '-t', String(CLICK.duration + 1 / fps), '-i', join(ASSETS, `click-pulse-${config.scale}x.png`))
+  if (audio) args.push('-i', audio.path)
   args.push(
     ffmpeg.filterComplexFileOption, filterPath,
     '-map', '[final]',
+  )
+  if (audio) args.push('-map', '[finalAudio]', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2')
+  args.push(
     '-t', String(number(outputDuration)),
     '-r', String(fps),
     '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
@@ -37,7 +44,7 @@ export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, s
   )
   try {
     await runCommand('ffmpeg', args, { signal })
-    const duration = await probeDuration(outputTemp, signal)
+    const duration = await probeVideoDuration(outputTemp, signal)
     if (!(Math.abs(duration - outputDuration) <= 1.5 / fps)) {
       throw new TraceframeError(`The rendered video is ${duration.toFixed(2)} seconds long, but the recording is ${outputDuration.toFixed(2)} seconds.`, { code: 'OUTPUT_MISMATCH' })
     }
@@ -51,7 +58,7 @@ export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, s
 }
 
 // Event times are seconds from the first frame of the raw video.
-export function buildFilterScript({ trace, scale }) {
+export function buildFilterScript({ trace, scale, audio }) {
   const { clicks, moves } = trace
   // Playwright ends the raw video by the time it received the last frame, so a page that stays still can end it a little before the post-roll. The page did not change, so repeat its last frame.
   const filters = [`[0:v]setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=1[video0]`]
@@ -75,6 +82,13 @@ export function buildFilterScript({ trace, scale }) {
     filters.push(`[cursorVideo${index}][cursor${index + 1}]overlay=x='${x}':y='${y}':${OVERLAY}:enable='${enable}'[cursorVideo${index + 1}]`)
   })
   filters.push(`[cursorVideo${moves.length}]colorspace=ispace=bt470bg:iprimaries=bt709:itrc=bt709:all=bt709:format=yuv420p[final]`)
+  if (audio) {
+    const input = clicks.length ? 3 : 2
+    const trim = number(Math.max(0, -audio.offset))
+    const delay = number(Math.max(0, audio.offset) * 1000)
+    // Reset the selected stream before trimming: its first sample may start after the container's video.
+    filters.push(`[${input}:a:0]asetpts=PTS-STARTPTS,atrim=start=${trim},asetpts=PTS-STARTPTS,adelay=${delay}:all=1,apad[finalAudio]`)
+  }
   return filters.join(';')
 }
 

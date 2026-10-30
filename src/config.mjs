@@ -62,16 +62,31 @@ function recordingConfig(options, viewport, defaults) {
   check(Number.isFinite(postRoll) && postRoll >= 0, 'Post-roll must be 0 or more seconds.')
   const flowTimeout = options.flowTimeout ?? 120
   check(Number.isFinite(flowTimeout) && flowTimeout > 0, 'Flow timeout must be more than 0 seconds.')
+  const runDirectory = options.runDirectory ? resolve(options.runDirectory) : undefined
 
   return {
     output,
+    audio: typeof options.audio === 'function' ? options.audio : createAudioConfig(options.audio, output, runDirectory),
     viewport: { ...viewport },
     video,
     scale,
     postRoll,
     flowTimeout,
-    runDirectory: options.runDirectory ? resolve(options.runDirectory) : undefined,
+    runDirectory,
   }
+}
+
+export function createAudioConfig(audio, output, directory) {
+  if (audio === undefined) return undefined
+  check(typeof audio?.path === 'string' && audio.path.length > 0, 'Audio must specify a local file path (--audio <path>, or audio: { path }).')
+  const path = resolve(audio.path)
+  check(path !== output, 'Audio input and video output must use different paths.')
+  if (directory) {
+    check(!['capture.webm', 'render.filter', 'failure.png'].some((name) => path === resolve(directory, name)), `Audio input must not use a reserved recording file: ${path}`)
+  }
+  const offset = audio.offset ?? 0
+  check(Number.isFinite(offset), 'Audio offset must be a finite number of seconds.')
+  return { path, offset }
 }
 
 function check(valid, message) {
