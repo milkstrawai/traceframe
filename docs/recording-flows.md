@@ -208,6 +208,14 @@ Inspect the reported screenshot, then the capture near the reported time if need
 
 Only paths saved for the current attempt are reported. A closed or unresponsive page may prevent a screenshot or capture from being saved. Errors before the first frame have no recording time, and a flow timeout may have no source location. Without `--run-dir`, flow locations and timing are still reported when available, but temporary captures are removed and no failure screenshot is saved. The API exposes the same context through [`error.diagnostics`](../README.md#errors-and-cancellation).
 
+## Align external audio
+
+Capture the application's actual processed output with your own audio recorder, then pass its local file through [`audio`](../README.md#add-audio). Use the same prepared page with `recordPage` when the audio setup needs a caller-owned context. Audio recording remains your script's responsibility; Traceframe aligns and encodes the supplied file in the final MP4.
+
+Use a distinct sound and visible change as a synchronization marker. If the visible change lands at 2.00 seconds in the video and its sound starts at 2.08 seconds in the audio file, pass `offset: -0.08`. Measure on the actual recorded streams, accounting for capture-device and encoder latency. For a live recorder, the audio supplier's `startedAt` gives the video clock; the recorder's timestamp must refer to its first sample on a shared clock.
+
+Inspect the rendered result with audio enabled, and compare another marker near the end. If the difference grows, a constant offset is insufficient: correct the external recording's rate separately before adding it. Traceframe never changes audio speed or pitch. Trimmed audio ends with the video, including post-roll; shorter audio leaves silence. For independent takes, calculate alignment for each take and close the external recorder in your script's `finally` block.
+
 ## Edit the finished video
 
 Edit the finished MP4 with FFmpeg rather than changing the flow. Editing finished frames keeps the page and cursor together. Keep the original, and say when a clip's pacing was edited.
@@ -224,6 +232,8 @@ export default async function ({ page, click, wait }) {
 ```
 
 Log to `console.error`, because Traceframe prints its JSON summary on standard output. This command plays seconds 2 to 9 at 4× speed. Set `fps` to the video's frame rate: 60 for the default preset, 30 for draft.
+
+This command drops the audio track. To keep audio synchronized, apply the same cuts and speed changes to its timeline, including when speeding up silent intervals.
 
 ```sh
 ffmpeg -i recording.mp4 -filter_complex "[0:v]trim=0:2,setpts=PTS-STARTPTS[a];[0:v]trim=2:9,setpts=(PTS-STARTPTS)/4[b];[0:v]trim=9,setpts=PTS-STARTPTS[c];[a][b][c]concat=n=3,fps=60[v]" -map "[v]" -c:v libx264 -crf 18 -movflags +faststart faster.mp4

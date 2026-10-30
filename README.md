@@ -2,7 +2,7 @@
 
 Traceframe records a scripted Chromium flow and renders an MP4 with a smooth cursor and click pulse. Everything runs locally: pages, flows, videos, and authentication state stay on your machine.
 
-Recordings are silent; audio is not captured.
+Browser capture is silent by default. Add an [external audio file](#add-audio) with explicit timing; tab audio and microphones are not captured automatically.
 
 https://github.com/user-attachments/assets/38e02cd5-a9ba-4f3c-938c-159955353141
 
@@ -170,7 +170,7 @@ The callback receives the same `page`, `signal` and five helpers as a flow file.
 
 Use Playwright 1.64.1 with Chromium, a fixed viewport, 100% browser zoom and an unscaled page. Traceframe checks the page's inner dimensions and visual viewport before starting capture, rejecting unsupported geometry with `CAPTURE_SIZE_MISMATCH`. `recordPage` keeps the page, context and browser open on success, failure and cancellation. It does not navigate, resize, run a `ready` hook, or change page timeouts. Your script owns setup and shutdown. The CLI and `record` continue to create and close their own browser.
 
-`page` and a function `flow` are required. `output`, `postRoll`, `flowTimeout`, `runDirectory` and `signal` have the same meaning as in `record`, and the return value is the same recording summary. Set `initialPointer: { x, y }` to choose the starting cursor position. The page's viewport determines the dimensions; `scale` defaults to 1 and accepts 1 or 2, and `fps` defaults to 30 and accepts 30 or 60. Use these explicit settings instead of a preset. Browser setup options such as `url`, `browser`, `storageState`, viewport dimensions and `readyTimeout` are rejected.
+`page` and a function `flow` are required. `output`, `audio`, `postRoll`, `flowTimeout`, `runDirectory` and `signal` have the same meaning as in `record`, and the return value is the same recording summary. Set `initialPointer: { x, y }` to choose the starting cursor position. The page's viewport determines the dimensions; `scale` defaults to 1 and accepts 1 or 2, and `fps` defaults to 30 and accepts 30 or 60. Use these explicit settings instead of a preset. Browser setup options such as `url`, `browser`, `storageState`, viewport dimensions and `readyTimeout` are rejected.
 
 Traceframe moves the caller's pointer only after validating the first frame. To show the starting hover state from frame 0, move the page's mouse to your chosen `initialPointer` before calling `recordPage`.
 
@@ -181,6 +181,39 @@ Keep the viewport, zoom and visual scale fixed and the page open until `recordPa
 Await every helper. Helpers observe cancellation before further pointer or scroll actions, and release a mouse button that was already pressed; an already-issued action may still complete. Arbitrary callback code must cooperate with `signal`, including passing it to supported Playwright operations. A flow timeout does not forcibly terminate that code. Sequential takes are supported after a successful screencast stop, including ordinary flow failures and cooperative cancellation. If Playwright's FFmpeg is missing, Traceframe stops the partial capture before rejecting. Other startup or stop failures may need a new page or context; Traceframe leaves that recovery to the caller and does not stop a pre-existing caller screencast.
 
 Traceframe removes its own temporary outputs unless `runDirectory` is supplied. Playwright keeps original WebMs in its browser artifacts directory until the caller closes the browser, even after a take has been saved. For extension pages, use full Chromium; the headless shell alone does not load extensions. This path was checked on Linux with Playwright 1.64.1 and its bundled full Chromium using a synthetic extension.
+
+### Add audio
+
+Both `record` and `recordPage` accept `audio: { path: './sound.wav', offset: 0 }`. The CLI accepts the same settings:
+
+```sh
+npx @milkstraw/traceframe record --url http://localhost:3000 --flow ./flow.mjs \
+  --audio .traceframe/sound.wav --audio-offset 0.5 --out .traceframe/demo.mp4
+```
+
+`offset` is seconds from the first video frame to the first audio sample. Positive values add leading silence; negative values discard the beginning of the audio (in the CLI, use e.g. `--audio-offset=-0.25`). The default is 0. Short audio is padded with silence, and longer audio is trimmed to the video's end. Nothing is looped or stretched. The first audio stream is encoded as stereo AAC at 48 kHz, 192 kb/s; system FFmpeg must provide its standard `aac` encoder. Successful summaries include `audio: true`.
+
+The input must be a local file, such as WAV, MP3, M4A or audio WebM. Static inputs are checked before browser recording, so a missing file or missing audio stream cannot waste a take (`AUDIO_INVALID`). After capture, an audio start at or after the video's end rejects with `AUDIO_OUTSIDE_VIDEO`. A negative offset that discards the entire source produces a silent audio track.
+
+Traceframe reads the file without modifying or deleting it; use an input path different from the output and the reserved files in `runDirectory` (`capture.webm`, `render.filter`, `failure.png`). Keep recordings in an ignored directory.
+
+For audio recorded alongside the flow, supply an async function instead. It runs once after successful capture and post-roll, before rendering, so it can finalize the external recorder and return its file. `startedAt` is the first video frame's timestamp in epoch milliseconds:
+
+```js
+await recordPage({
+  page,
+  output: '.traceframe/demo.mp4',
+  flow,
+  audio: async ({ startedAt, signal }) => {
+    const { path, startedAt: audioStartedAt } = await finishAudioRecording({ signal })
+    return { path, offset: (audioStartedAt - startedAt) / 1000 }
+  },
+})
+```
+
+Here `finishAudioRecording` belongs to your script and reports the timestamp of its first recorded sample. Use timestamps on a shared clock, or determine the offset using an audiovisual marker. An offset corrects a constant alignment difference; it does not correct clock drift. Check markers near both ends of longer takes. See the [audio workflow](docs/recording-flows.md#align-external-audio).
+
+Your script owns the external recorder and its cleanup, including on flow failure or cancellation. The audio function is skipped if capture fails and must cooperate with `signal` when supplied. It may finish writing after capture; a static input must already exist before recording. Neither form captures browser or system sound by itself.
 
 ### Errors and cancellation
 
