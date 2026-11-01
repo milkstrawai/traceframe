@@ -27,6 +27,8 @@ before(async () => {
     late: join(directory, 'late.mkv'),
     shifted: join(directory, 'shifted.webm'),
     live: join(directory, 'live.webm'),
+    gapped: join(directory, 'gapped.mka'),
+    jittered: join(directory, 'jittered.webm'),
   }
   // Different, separated tones in each channel expose both timing and routing mistakes.
   await runCommand('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', "aevalsrc=exprs='if(between(t,0.25,0.35),0.5*sin(2*PI*880*t),0)|if(between(t,0.6,0.7),0.5*sin(2*PI*440*t),0)':s=44100:d=1", media.path])
@@ -34,6 +36,11 @@ before(async () => {
   await runCommand('ffmpeg', ['-v', 'error', '-i', media.rawPath, '-itsoffset', '0.7', '-i', media.path, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'pcm_s16le', media.late])
   await runCommand('ffmpeg', ['-v', 'error', '-i', media.path, '-c:a', 'libopus', '-avoid_negative_ts', 'disabled', '-output_ts_offset', '-0.5', media.shifted])
   await runCommand('ffmpeg', ['-v', 'error', '-i', media.path, '-c:a', 'libopus', '-live', '1', media.live])
+  await runCommand('ffmpeg', ['-v', 'error', '-i', media.path, '-af', "aselect='not(between(t,0.4,0.5))'", '-c:a', 'pcm_s16le', media.gapped])
+  // Real recorders jitter packet timestamps without losing audio samples.
+  const steady = join(directory, 'steady.webm')
+  await runCommand('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=1', '-c:a', 'libopus', '-frame_duration', '20', steady])
+  await runCommand('ffmpeg', ['-v', 'error', '-i', steady, '-c', 'copy', '-bsf:a', 'setts=pts=PTS+mod(N\\,2)*0.005/TB:dts=DTS+mod(N\\,2)*0.005/TB', media.jittered])
 })
 after(async () => { if (media) await rm(media.directory, { recursive: true, force: true }) })
 
@@ -99,6 +106,46 @@ for (const [offset, end, clicks, fps] of [[0, 1.4, false, 30], [0.375, 1.4, true
   })
 }
 
+test('audio timestamp gaps remain silent without pulling later sounds forward', { timeout: 30_000 }, async () => {
+  await withMedia(async ({ directory, rawPath, gapped }) => {
+    const output = join(directory, 'gapped.mp4')
+    await renderVideo({
+      rawPath, directory,
+      trace: { initialPointer: { x: 10, y: 20 }, moves: [], clicks: [], end: 1.2 },
+      config: { video: { ...viewport, fps: 30 }, scale: 1, postRoll: 0, output },
+      ffmpeg: await probeFfmpeg({ audio: true }), audio: { path: gapped, offset: 0 },
+    })
+    const { samples } = await inspect(output)
+    assert.ok(rms(samples, 0, 0.27, 0.33) > 0.25)
+    assert.ok(rms(samples, 1, 0.47, 0.53) < 0.003)
+    assert.ok(rms(samples, 1, 0.62, 0.68) > 0.25)
+    assert.ok(Math.abs(samples.length / 8 / 48000 - 1.2) < 0.04)
+  })
+})
+
+test('ordinary recorder timestamp jitter does not insert silence or discontinuities', { timeout: 30_000 }, async () => {
+  await withMedia(async ({ directory, rawPath, jittered }) => {
+    const output = join(directory, 'jittered.mp4')
+    await renderVideo({
+      rawPath, directory,
+      trace: { initialPointer: { x: 10, y: 20 }, moves: [], clicks: [], end: 1 },
+      config: { video: { ...viewport, fps: 30 }, scale: 1, postRoll: 0, output },
+      ffmpeg: await probeFfmpeg({ audio: true }), audio: { path: jittered, offset: 0 },
+    })
+    const { samples } = await inspect(output)
+    let peak = 0, quiet = 0
+    for (let index = 4800; index < 43200; index++) peak = Math.max(peak, Math.abs(samples.readFloatLE(index * 8)))
+    assert.ok(peak > 0.04, 'The continuous tone is missing.')
+    for (let index = 4800; index < 43200; index++) {
+      const current = samples.readFloatLE(index * 8)
+      const next = samples.readFloatLE((index + 1) * 8)
+      assert.ok(Math.abs(next - current) < peak * 0.12, `Audio discontinuity at sample ${index}.`)
+      quiet = Math.abs(current) < peak * 0.02 ? quiet + 1 : 0
+      assert.ok(quiet < 48, `Inserted silence at sample ${index}.`)
+    }
+  })
+})
+
 test('static audio errors reject before a caller-page flow and preserve the previous output', { timeout: 30_000 }, async () => {
   await withMedia(async ({ directory, path, rawPath }) => {
     const browser = await chromium.launch()
@@ -142,7 +189,8 @@ test('negative audio offsets use samples rather than container duration and can 
           assert.ok(rms(samples, 1, 0.02, 0.08) > 0.25)
           assert.ok(rms(samples, 0, 0.02, 0.08) < 0.003)
         } else {
-          assert.ok(samples.every((byte) => byte === 0))
+          // Older AAC decoders can emit negative zero for silent samples.
+          for (let byte = 0; byte < samples.length; byte += 4) assert.ok(samples.readFloatLE(byte) === 0)
         }
       }
     } finally {

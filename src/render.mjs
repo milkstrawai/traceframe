@@ -87,7 +87,8 @@ export function buildFilterScript({ trace, scale, audio }) {
     const trim = number(Math.max(0, -audio.offset))
     const delay = number(Math.max(0, audio.offset) * 1000)
     // Reset the selected stream before trimming: its first sample may start after the container's video.
-    filters.push(`[${input}:a:0]asetpts=PTS-STARTPTS,atrim=start=${trim},asetpts=PTS-STARTPTS,adelay=${delay}:all=1,apad[finalAudio]`)
+    // Preserve real gaps before sample-count filters, tolerating normal recorder timestamp jitter.
+    filters.push(`[${input}:a:0]asetpts=PTS-STARTPTS,aresample=async=1:min_hard_comp=0.02,atrim=start=${trim},asetpts=PTS-STARTPTS,adelay=${delay}:all=1,apad[finalAudio]`)
   }
   return filters.join(';')
 }
