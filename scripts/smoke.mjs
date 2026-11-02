@@ -18,6 +18,7 @@ try {
     flow: join(root, 'examples', 'fixture-flow.mjs'),
     output: join(runDirectory, 'sample.mp4'),
     preset,
+    capture: process.env.TRACEFRAME_CAPTURE,
   })
 
   const { stdout } = await promisify(execFile)('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,r_frame_rate', '-of', 'csv=p=0', summary.output])

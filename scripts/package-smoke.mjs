@@ -26,6 +26,7 @@ try {
   await run('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', audio])
   const { stdout } = await run(bin, [
     'record', '--preset', 'draft',
+    ...(process.env.TRACEFRAME_CAPTURE ? ['--capture', process.env.TRACEFRAME_CAPTURE] : []),
     '--url', pathToFileURL(join(examples, 'recipes.html')).href,
     '--flow', join(examples, 'recipes-flow.mjs'),
     '--audio', audio, '--audio-offset', '0.5',

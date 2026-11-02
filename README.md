@@ -63,6 +63,36 @@ Use `--run-dir .traceframe/runs/name` (`runDirectory` in the API) to keep the ra
 
 When available, failure output includes the error code, flow-file locations, elapsed recording time, and paths to artifacts saved for that attempt. Without `--run-dir`, temporary captures are removed and no failure screenshot is saved. See [diagnosing a failed take](docs/recording-flows.md#diagnose-a-failed-take).
 
+### Native Linux capture
+
+For smoother page motion at high resolution, opt in with `--capture native` (`capture: 'native'` in `record`). The default remains `playwright`. Native capture runs full Chromium on its own authenticated virtual display; it works on a headless server without a monitor or GPU.
+
+On Ubuntu or Debian, install its additional prerequisites:
+
+```sh
+sudo apt-get update
+sudo apt-get install --yes xvfb build-essential libx11-dev libxext-dev
+npx playwright@1.64.1 install --with-deps chromium
+```
+
+System FFmpeg and ffprobe are still required. The first native recording compiles the bundled C sampler with `cc` and caches it under `$XDG_CACHE_HOME/traceframe/native`, or `~/.cache/traceframe/native`. Subsequent takes reuse it. There are no npm install scripts or automatic system-package installations. The default backend needs none of these additional tools.
+
+```sh
+npx @milkstraw/traceframe record \
+  --capture native --url http://localhost:3000 \
+  --flow ./flow.mjs --out .traceframe/native.mp4
+```
+
+Native capture supports the same presets, pointer helpers, page captions, saved login state and external audio. It captures the full viewport at its native resolution, then uses the usual cursor and MP4 renderer. System scrollbars and browser speaker output are suppressed, matching the default backend; supplied external audio is unaffected. The frame rate remains dependent on page rendering and available CPU; start with one recording at a time for best smoothness. Each concurrent recording has its own display and browser.
+
+Browser notices that overlap the page, such as download notifications, can appear in native captures.
+
+This backend supports `record` and the CLI on Linux. `recordPage` uses Playwright capture because the caller's browser may share its display with other windows. Native capture requires one page: new tabs, popups, closed targets, and failed capture processes reject the take with `NATIVE_CAPTURE_FAILED`. Keep navigation on the recorded page. Keep viewport, browser zoom and window geometry fixed. Traceframe rejects detected geometry changes; transient changes are unsupported and may go undetected. Missing dependencies reject with `NATIVE_UNAVAILABLE`. Traceframe does not fall back or replay the flow after a native failure; an existing output MP4 is preserved.
+
+`--run-dir` keeps the native raw capture as `capture.mkv` (H.264 in Matroska), alongside the usual filter and best-effort failure screenshot. The private display's authentication file is temporary and removed during shutdown. Native capture bounds sampler and encoder shutdown; an unresponsive child is killed and the take fails. In containers, Chromium, Xvfb and the sampler must share an IPC namespace with enough shared memory. A small init process, such as Docker's `--init`, reaps orphaned browser children if a container is stopped abruptly.
+
+The native intermediate uses lossless encoding and can be much larger than the final MP4. Long, motion-heavy takes can require several GB of temporary space. Without `--run-dir`, captures use the system temporary directory; set `TMPDIR` to a disk-backed directory with enough free space if needed. A RAM-backed temporary directory consumes memory as the recording grows.
+
 ## Write a flow
 
 The flow module exports a default function. Timing values are seconds:
@@ -114,7 +144,7 @@ A flow may contain at most 100 moves and 100 clicks, and each `duration`, `dwell
 
 ### What appears in the video
 
-Playwright typing and scrolling appear in the captured page. Direct `page.mouse`, `locator.click()`, and dragging calls bypass Traceframe's cursor trace and click pulses, so use its pointer helpers for visible interactions. Only the starting page is recorded; new tabs and popups do not appear in the video.
+Playwright typing and scrolling appear in the captured page. Direct `page.mouse`, `locator.click()`, and dragging calls bypass Traceframe's cursor trace and click pulses, so use its pointer helpers for visible interactions. With Playwright capture, only the starting page is recorded; new tabs and popups do not appear in the video. Native capture rejects new tabs and popups.
 
 ### Have an agent create the flow
 
@@ -195,7 +225,7 @@ npx @milkstraw/traceframe record --url http://localhost:3000 --flow ./flow.mjs \
 
 The input must be a local file, such as WAV, MP3, M4A or audio WebM. Static inputs are checked before browser recording, so a missing file or missing audio stream cannot waste a take (`AUDIO_INVALID`). After capture, an audio start at or after the video's end rejects with `AUDIO_OUTSIDE_VIDEO`. A negative offset that discards the entire source produces a silent audio track.
 
-Traceframe reads the file without modifying or deleting it; use an input path different from the output and the reserved files in `runDirectory` (`capture.webm`, `render.filter`, `failure.png`). Keep recordings in an ignored directory.
+Traceframe reads the file without modifying or deleting it; use an input path different from the output and the reserved files in `runDirectory` (`capture.webm`, `capture.mkv`, `render.filter`, `failure.png`). Keep recordings in an ignored directory.
 
 For audio recorded alongside the flow, supply an async function instead. It runs once after successful capture and post-roll, before rendering, so it can finalize the external recorder and return its file. `startedAt` is the first video frame's timestamp in epoch milliseconds:
 
@@ -225,14 +255,14 @@ When available, `error.diagnostics` contains:
 | --- | --- |
 | `flowLocations` | Locations in the supplied flow file, as `{ file, line, column }` objects with an absolute path and 1-based line/column. Empty for a callback or when the error stack has no matching frame. |
 | `recordingTime` | Elapsed seconds from the first captured frame for a capture-stage failure, measured before collecting failure artifacts. Omitted before the first frame and for later rendering failures. |
-| `capturePath` | Absolute path to the retained raw capture, only when `runDirectory` was supplied and saving succeeded. |
+| `capturePath` | Absolute path to a nonempty retained raw capture, only when `runDirectory` was supplied. Native failures can leave a truncated recording. |
 | `screenshotPath` | Absolute path to the saved failure screenshot, only when `runDirectory` was supplied and the screenshot succeeded. |
 
-A flow timeout may have no flow location because it is raised outside the blocked operation. Screenshots are best effort and have a five-second collection budget. Partial captures are saved before browser shutdown, with no fixed time limit so slower encoders can finish. Diagnostic failures do not replace the original error.
+A flow timeout may have no flow location because it is raised outside the blocked operation. Screenshots are best effort and have a five-second collection budget. Partial captures are saved before browser shutdown; Playwright capture has no fixed stop deadline so slower encoders can finish, while native capture bounds shutdown. Diagnostic failures do not replace the original error.
 
 Pass `signal` to stop a recording early. Traceframe stops its recording/rendering work and removes its temporary files before rejecting with the signal's reason. `record` also closes its browser; `recordPage` leaves the caller's browser open. When you pass a signal, Traceframe leaves Ctrl-C and other termination signals to you. The CLI does this for you: the first Ctrl-C stops and cleans up, and a second one exits at once.
 
-A stuck recording encoder can delay saving and cancellation indefinitely. A second Ctrl-C forces the CLI to exit and can discard the unfinished capture. API callers that need a hard shutdown deadline should run recording in a separate process they can terminate.
+A stuck Playwright recording encoder can delay saving and cancellation indefinitely. A second Ctrl-C forces the CLI to exit and can discard the unfinished capture. API callers that need a hard shutdown deadline should run recording in a separate process and terminate its whole process tree, for example through a process group or container. Native capture kills an unresponsive sampler after three seconds and allows its encoder five seconds to finalize before forcing shutdown. Its display, sampler and encoder also stop if the recorder process dies abruptly, but temporary files can remain and the unfinished capture may be unusable.
 
 ## Sample output
 
@@ -253,6 +283,8 @@ npm run test:smoke
 TRACEFRAME_PRESET=standard npm run test:smoke
 npm run test:package
 ```
+
+After installing the native prerequisites and full Chromium, run `npm run test:native`. To smoke-test the native path, use `TRACEFRAME_CAPTURE=native TRACEFRAME_PRESET=standard npm run test:smoke` and `TRACEFRAME_CAPTURE=native npm run test:package`.
 
 To release, set the version in `package.json` and `package-lock.json`, push all release changes to `main`, and publish a GitHub Release with the tag `v<version>` on the final tested commit containing those changes. The Release workflow reruns CI and stages the package on npm. A maintainer downloads it with `npm stage download <stage-id>`, checks that its files match `npm pack` at the tag, and approves it on npmjs.com with 2FA.
 

@@ -47,3 +47,74 @@ jobs:
 
       - name: Install and run the packed package
         run: npm run test:package
+
+  native-ffmpeg5:
+    name: Native capture / FFmpeg 5
+    runs-on: ubuntu-latest
+    container: node:22-bookworm
+    env:
+      TRACEFRAME_CAPTURE: native
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Install native capture dependencies
+        run: apt-get update && apt-get install --yes ffmpeg xvfb build-essential libx11-dev libxext-dev procps
+
+      - name: Verify FFmpeg 5 compatibility path
+        run: node --input-type=module -e "import assert from 'node:assert/strict'; import { probeFfmpeg } from './src/ffmpeg.mjs'; assert.equal((await probeFfmpeg()).frameSyncOption, '-vsync')"
+
+      - name: Check native raw-frame cadence and captured content
+        run: node --test --test-name-pattern='native recordings preserve all viewport edges' test/native.integration.test.mjs
+        env:
+          TRACEFRAME_TEST_NATIVE: '1'
+
+      - name: Record and render at native resolution
+        run: npm run test:smoke
+        env:
+          TRACEFRAME_PRESET: standard
+
+  native:
+    name: Native capture / Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    env:
+      TRACEFRAME_CAPTURE: native
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install full Chromium and headless shell
+        run: npx playwright install --with-deps chromium
+
+      - name: Install native capture dependencies
+        run: sudo apt-get update && sudo apt-get install --yes ffmpeg xvfb build-essential libx11-dev libxext-dev
+
+      - name: Test native lifecycle and recording
+        run: npm run test:native
+
+      - name: Record at native resolution
+        run: npm run test:smoke
+        env:
+          TRACEFRAME_PRESET: standard
+
+      - name: Install and run the packed package
+        run: npm run test:package

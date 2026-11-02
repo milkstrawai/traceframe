@@ -160,7 +160,9 @@ The two `Emulation` calls set the locale that `navigator.language`, `Intl`, and 
 
 Use `--preset draft` while writing the flow and the default preset for the final video.
 
-While writing the flow, pass `--run-dir` with an ignored folder, such as `.traceframe/runs/demo`. Use a separate directory for each take. A failed take keeps its partial `capture.webm` when saving succeeds and attempts a viewport screenshot, `failure.png`. The raw capture has no added cursor overlay and may include repeated final frames after the failure time.
+On Linux, [`--capture native`](../README.md#native-linux-capture) can improve scrolling and animation smoothness without reducing resolution. Install its prerequisites, then add that option to the same command. Use a single page and keep its geometry fixed; new tabs and popups fail a native take. Captions, saved login state, same-page navigation and external audio use the same flow APIs.
+
+While writing the flow, pass `--run-dir` with an ignored folder, such as `.traceframe/runs/demo`. Use a separate directory for each take. A failed take keeps its partial `capture.webm` (`capture.mkv` with native capture) when available and attempts a viewport screenshot, `failure.png`. The raw capture has no added cursor overlay and may include repeated final frames after the failure time. Native worker failures can leave a truncated recording, even if that file still decodes successfully.
 
 A failed take may already have submitted real jobs, so reset demo data before recording again. Check the finished file for decode errors:
 
