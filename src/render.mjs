@@ -15,7 +15,8 @@ const OVERLAY = 'eof_action=pass:format=yuv444'
 
 export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, signal, audio }) {
   const { fps } = config.video
-  const outputDuration = Math.max(trace.end + config.postRoll, ...trace.clicks.map((click) => click.at + CLICK.duration))
+  // An empty take can end within the first frame's fractional millisecond.
+  const outputDuration = Math.max(1 / fps, trace.end + config.postRoll, ...trace.clicks.map((click) => click.at + CLICK.duration))
   if (audio && audio.offset >= outputDuration) {
     throw new TraceframeError(`Audio offset ${audio.offset} seconds starts at or after the video's end (${number(outputDuration)} seconds). Reduce its offset.`, { code: 'AUDIO_OUTSIDE_VIDEO' })
   }

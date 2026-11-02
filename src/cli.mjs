@@ -15,6 +15,7 @@ const OPTION_KEYS = {
   out: 'output',
   preset: 'preset',
   browser: 'browser',
+  capture: 'capture',
   'storage-state': 'storageState',
   'viewport-width': 'viewportWidth',
   'viewport-height': 'viewportHeight',
@@ -39,6 +40,7 @@ Options:
   --preset <standard|draft>    standard: 1280x800 CSS viewport, 2560x1600 at 60 FPS (default)
                                draft: 1280x800 CSS viewport, 1280x800 at 30 FPS
   --browser <path>             Chromium executable (or set CHROME_PATH)
+  --capture <playwright|native> Capture backend (default: playwright); native is opt-in on Linux
   --storage-state <path>       Playwright storage state JSON
   --viewport-width <pixels>    CSS viewport width
   --viewport-height <pixels>   CSS viewport height

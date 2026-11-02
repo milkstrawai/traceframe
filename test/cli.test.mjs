@@ -35,6 +35,11 @@ test('passes --out and numeric options through to the configuration', async () =
   assert.match((await run('record', '--url', 'file:///tmp/page.html', '--flow', 'missing-flow.mjs', '--flow-timeout', '300')).stderr, /Could not load flow/)
 })
 
+test('documents and validates the opt-in capture backend', async () => {
+  assert.match((await run('--help')).stdout, /--capture <playwright\|native>/)
+  assert.match((await run('record', ...flowArgs, '--capture', 'unknown')).stderr, /Capture must be playwright or native/)
+})
+
 test('parses audio settings and explains incomplete or invalid offsets', async () => {
   const help = await run('--help')
   assert.match(help.stdout, /--audio <path>/)

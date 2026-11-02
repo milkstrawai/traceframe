@@ -1,6 +1,11 @@
 import { spawn } from 'node:child_process'
 import { addAbortListener } from 'node:events'
 
+export function describeExit({ code, signal, error, forced }) {
+  const status = error?.message ?? (signal ? `signal ${signal}` : `exit code ${code}`)
+  return forced ? `${status}, forced termination` : status
+}
+
 export function startProcess(command, args, options = {}) {
   const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], ...options })
   let stderr = ''

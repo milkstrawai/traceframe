@@ -48,7 +48,7 @@ async function recordFlow({ config, flow, ffmpeg, signal, page }) {
   let capture
   let failed = false
   try {
-    capture = await captureFlow({ config, flow, directory, signal, page })
+    capture = await captureFlow({ config, flow, ffmpeg, directory, signal, page })
     const { rawPath, trace } = capture
     if (typeof config.audio === 'function') {
       signal?.throwIfAborted()

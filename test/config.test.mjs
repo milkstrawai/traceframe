@@ -23,6 +23,18 @@ test('applies the draft preset', () => {
   assert.deepEqual([config.viewport, config.video, config.scale], [{ width: 1280, height: 800 }, { width: 1280, height: 800, fps: 30 }, 1])
 })
 
+test('native capture is explicit and requires a Traceframe-owned Linux browser', () => {
+  assert.equal(createConfig(base).capture, 'playwright')
+  assert.equal(createConfig({ ...base, capture: 'playwright' }).capture, 'playwright')
+  assert.throws(() => createConfig({ ...base, capture: 'auto' }), /Capture must be playwright or native/)
+  if (process.platform === 'linux') {
+    assert.equal(createConfig({ ...base, capture: 'native' }).capture, 'native')
+    assert.throws(() => createConfig({ ...base, capture: 'native', viewportWidth: 2 }), /at least 8/)
+  } else {
+    assert.throws(() => createConfig({ ...base, capture: 'native' }), /only on Linux/)
+  }
+})
+
 test('sizes the video as the viewport times the scale', () => {
   const config = createConfig({ ...base, preset: 'draft', scale: 2 })
   assert.deepEqual(config.video, { width: 2560, height: 1600, fps: 30 })
@@ -52,6 +64,8 @@ test('existing-page settings use the caller viewport with explicit scale and fps
   assert.equal(config.flow, undefined)
   assert.equal(config.url, undefined)
   assert.deepEqual(createPageConfig({ page, scale: 2, fps: 60 }).video, { width: 1280, height: 960, fps: 60 })
+  assert.deepEqual(createPageConfig({ page, capture: 'playwright' }).video, config.video)
+  assert.throws(() => createPageConfig({ page, capture: 'native' }), /requires a browser launched by record or the CLI/)
 })
 
 test('existing-page settings reject implicit browser setup and unfixed viewports', () => {
@@ -73,7 +87,7 @@ test('both recording paths normalize external audio with an explicit offset', ()
       assert.throws(() => configure({ audio: invalid }), { code: 'INVALID_CONFIG' })
     }
     assert.throws(() => configure({ output: 'same.mp4', audio: { path: 'same.mp4' } }), /different paths/)
-    for (const name of ['capture.webm', 'render.filter', 'failure.png']) {
+    for (const name of ['capture.webm', 'capture.mkv', 'render.filter', 'failure.png']) {
       assert.throws(() => configure({ runDirectory: 'take', audio: { path: `take/${name}` } }), /reserved recording file/)
     }
   }

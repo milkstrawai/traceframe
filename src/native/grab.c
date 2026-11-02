@@ -4,6 +4,7 @@
 #include <X11/extensions/XShm.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#include <sys/prctl.h>
 #include <signal.h>
 #include <time.h>
 #include <unistd.h>
@@ -111,6 +112,23 @@ static int write_header(int width, int height, int rate) {
 }
 
 int main(int argc, char **argv) {
+  if (argc >= 3 && strcmp(argv[1], "--parent") == 0) {
+    char *end;
+    long parent = strtol(argv[2], &end, 10);
+    if (!*argv[2] || *end || parent <= 0) return 1;
+    // Also protects exec'd Xvfb/FFmpeg, without an extra supervisor process.
+    // SIGKILL stops even a stalled worker. Normal shutdown still uses SIGTERM.
+    if (prctl(PR_SET_PDEATHSIG, SIGKILL) < 0) { perror("prctl"); return 1; }
+    // The owner may have died before the kernel registered the death signal.
+    if (getppid() != parent) return 1;
+    argc -= 2;
+    argv += 2;
+  }
+  if (argc >= 3 && strcmp(argv[1], "--exec") == 0) {
+    execvp(argv[2], argv + 2);
+    perror(argv[2]);
+    return 1;
+  }
   int locate = argc == 5 && strcmp(argv[1], "--locate") == 0;
   if (!locate && argc != 6) {
     fprintf(stderr, "Usage: grab WIDTH HEIGHT X Y FPS | grab --locate WIDTH HEIGHT SCALE\n");

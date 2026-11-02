@@ -6,20 +6,28 @@ import { chromium } from 'playwright'
 
 import { TraceframeError } from '../errors.mjs'
 import { buildGrabber, createAuthority, INSTALL_HELP } from './setup.mjs'
-import { deadline, startProcess, stopProcess } from './process.mjs'
+import { deadline, describeExit, startProcess, stopProcess } from './process.mjs'
 import { calibrateViewport, monitorPage } from './page.mjs'
 
 const failure = (message, cause) => new TraceframeError(message, { code: 'NATIVE_CAPTURE_FAILED', cause })
 
-function describeExit({ code, signal, error, forced }) {
-  const status = error?.message ?? (signal ? `signal ${signal}` : `exit code ${code}`)
-  return forced ? `${status}, forced termination` : status
+export async function createNativeSession(config, signal, options) {
+  // Before Playwright owns the browser, catch termination so Node runs the
+  // compiler/session exit hooks. Explicit signal callers own their OS signals.
+  const handlers = options.handleSignals ? Object.entries({ SIGINT: 130, SIGTERM: 143, SIGHUP: 129 }).map(([name, code]) => {
+    const exit = () => process.exit(code)
+    process.on(name, exit)
+    return [name, exit]
+  }) : []
+  try { return await openSession(config, signal, options) }
+  finally { for (const [name, exit] of handlers) process.off(name, exit) }
 }
 
-export async function createNativeSession(config, signal, { handleSignals, frameSyncOption }) {
+async function openSession(config, signal, { handleSignals, frameSyncOption }) {
   try { await access(config.browser ?? chromium.executablePath(), constants.X_OK) }
   catch (cause) { throw new TraceframeError(`Full Chromium is unavailable. ${INSTALL_HELP}`, { code: 'NATIVE_UNAVAILABLE', cause }) }
   const grabber = await buildGrabber(signal)
+  const parent = ['--parent', String(process.pid)]
   // Linux-only: keep Chromium's singleton socket paths short even when the
   // caller's TMPDIR is long. All display/socket files share this private root.
   const directory = await mkdtemp('/tmp/tf-')
@@ -57,15 +65,15 @@ export async function createNativeSession(config, signal, { handleSignals, frame
     const remember = (error) => { cleanupError ??= error }
     await closeBrowser().catch(remember)
     if (displayProcess) await stopProcess(displayProcess).catch(remember)
-    process.removeListener('exit', killOnExit)
     await rm(directory, { recursive: true, force: true }).catch(remember)
+    process.removeListener('exit', killOnExit)
     if (cleanupError) throw cleanupError
   }
   try {
     const authority = join(directory, 'authority')
     await writeFile(authority, createAuthority(), { mode: 0o600 })
     const screen = { width: config.video.width + 256 * config.scale, height: config.video.height + 256 * config.scale }
-    displayProcess = startProcess('Xvfb', ['-displayfd', '1', '-screen', '0', `${screen.width}x${screen.height}x24`, '-auth', authority, '-nolisten', 'tcp', '-noreset'])
+    displayProcess = startProcess(grabber, [...parent, '--exec', 'Xvfb', '-displayfd', '1', '-screen', '0', `${screen.width}x${screen.height}x24`, '-auth', authority, '-nolisten', 'tcp', '-noreset'])
     processes.add(displayProcess)
     const displayReady = Promise.withResolvers()
     let output = ''
@@ -124,7 +132,7 @@ export async function createNativeSession(config, signal, { handleSignals, frame
         })
         if (JSON.stringify(await geometry()) !== JSON.stringify(expectedGeometry)) throw failure('The native page geometry does not match the recording settings.')
         const origin = await calibrateViewport(page, config.scale, async (width, height) => {
-          const probe = startProcess(grabber, ['--locate', String(width), String(height), String(config.scale)], { env })
+          const probe = startProcess(grabber, [...parent, '--locate', String(width), String(height), String(config.scale)], { env })
           processes.add(probe)
           let coordinates = ''
           probe.child.stdout.on('data', (chunk) => { coordinates += chunk })
@@ -143,12 +151,12 @@ export async function createNativeSession(config, signal, { handleSignals, frame
         // A failed encoder must not expose a previous attempt's raw capture.
         await rm(path, { force: true })
         active.throwIfAborted()
-        encoder = watch(startProcess('ffmpeg', [
+        encoder = watch(startProcess(grabber, [...parent, '--exec', 'ffmpeg',
           '-y', '-hide_banner', '-loglevel', 'error', '-f', 'matroska', '-i', 'pipe:0',
           '-an', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '0', '-pix_fmt', 'yuv444p', '-threads', '4', frameSyncOption, 'cfr', '-r', String(config.video.fps), '-f', 'matroska', path,
         ], { stdio: ['pipe', 'ignore', 'pipe'] }), 'The native encoder')
         encoder.child.stdin.on('error', (error) => fail(failure('The native encoder stopped accepting frames.', error)))
-        sampler = watch(startProcess(grabber, [String(config.video.width), String(config.video.height), String(origin.x), String(origin.y), String(config.video.fps)], { env, stdio: ['ignore', encoder.child.stdin, 'pipe'] }), 'The native sampler')
+        sampler = watch(startProcess(grabber, [...parent, String(config.video.width), String(config.video.height), String(origin.x), String(origin.y), String(config.video.fps)], { env, stdio: ['ignore', encoder.child.stdin, 'pipe'] }), 'The native sampler')
         const first = Promise.withResolvers()
         let metadata = ''
         const onFrame = (chunk) => {

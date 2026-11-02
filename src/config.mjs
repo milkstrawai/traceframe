@@ -20,9 +20,16 @@ export function createConfig(options = {}) {
   check(options.url, 'A URL is required (the url option, or --url).')
   const readyTimeout = options.readyTimeout ?? 30
   check(Number.isFinite(readyTimeout) && readyTimeout > 0, 'Ready timeout must be more than 0 seconds.')
+  const capture = options.capture ?? 'playwright'
+  check(capture === 'playwright' || capture === 'native', 'Capture must be playwright or native.')
+  if (capture === 'native') {
+    check(process.platform === 'linux', 'Native capture is supported only on Linux.')
+    check(viewport.width >= 8 && viewport.height >= 8, 'Native capture needs a viewport of at least 8×8 CSS pixels.')
+  }
 
   return {
     ...recordingConfig(options, viewport, preset),
+    capture,
     url: options.url,
     flow: resolve(options.flow),
     storageState: options.storageState,
@@ -37,6 +44,7 @@ export function createPageConfig(options = {}) {
   check(!page.isClosed(), 'The supplied page is closed.')
   const viewport = page.viewportSize()
   check(viewport, 'recordPage requires a fixed viewport. Set it when creating the page or context; viewport: null is not supported.')
+  check(options.capture === undefined || options.capture === 'playwright', 'recordPage supports only playwright capture. Native capture requires a browser launched by record or the CLI.')
   for (const key of ['url', 'browser', 'storageState', 'readyTimeout', 'viewportWidth', 'viewportHeight', 'preset']) {
     check(options[key] === undefined, `recordPage does not accept ${key}; prepare the page before recording and use scale/fps for video settings.`)
   }
@@ -82,7 +90,7 @@ export function createAudioConfig(audio, output, directory) {
   const path = resolve(audio.path)
   check(path !== output, 'Audio input and video output must use different paths.')
   if (directory) {
-    check(!['capture.webm', 'render.filter', 'failure.png'].some((name) => path === resolve(directory, name)), `Audio input must not use a reserved recording file: ${path}`)
+    check(!['capture.webm', 'capture.mkv', 'render.filter', 'failure.png'].some((name) => path === resolve(directory, name)), `Audio input must not use a reserved recording file: ${path}`)
   }
   const offset = audio.offset ?? 0
   check(Number.isFinite(offset), 'Audio offset must be a finite number of seconds.')

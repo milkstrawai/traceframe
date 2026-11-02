@@ -45,3 +45,25 @@ test('repeats the last raw frame when the screencast ends slightly before the po
     await rm(directory, { recursive: true, force: true })
   }
 })
+
+test('renders a nonempty video for sub-frame takes, including fractional clock rounding', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'traceframe-render-'))
+  try {
+    const rawPath = join(directory, 'capture.mkv')
+    const ffmpeg = await probeFfmpeg()
+    for (const fps of [30, 60]) {
+      await runCommand('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', `color=white:s=8x8:r=${fps}`, '-frames:v', '1', '-c:v', 'libx264', rawPath])
+      for (const end of [-0.000359, 0, 0.0005]) {
+        const output = join(directory, 'output.mp4')
+        const duration = await renderVideo({ rawPath, directory, ffmpeg,
+          trace: { initialPointer: { x: 0, y: 0 }, moves: [], clicks: [], end },
+          config: { video: { width: 8, height: 8, fps }, scale: 1, postRoll: 0, output },
+        })
+        assert.ok(duration >= 1 / fps - 0.000001 && duration <= 2 / fps + 0.000001, `Unexpected empty-take duration: ${duration}s at ${fps} FPS.`)
+        const { stdout } = await runCommand('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-count_frames', '-show_entries', 'stream=nb_read_frames', '-of', 'csv=p=0', output])
+        // Matroska's millisecond timebase and output rounding can add one frame.
+        assert.ok([1, 2].includes(Number(stdout.trim())), `Unexpected frame count: ${stdout}`)
+      }
+    }
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})

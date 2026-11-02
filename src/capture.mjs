@@ -7,22 +7,31 @@ import { chromium } from 'playwright'
 import { TraceframeError } from './errors.mjs'
 import { addDiagnostics, retainedFile } from './diagnostics.mjs'
 import { createFlowApi } from './flow.mjs'
+import { createNativeSession } from './native/capture.mjs'
 
 const PLAYWRIGHT_DEFAULT_TIMEOUT = 30_000
 const FIRST_FRAME_TIMEOUT = 10_000
 const FAILURE_SCREENSHOT_TIMEOUT = 5_000
 
-export async function captureFlow({ config, flow, directory, page, signal: callerSignal }) {
-  const signal = callerSignal ?? new AbortController().signal
-  const rawPath = join(directory, 'capture.webm')
+export async function captureFlow({ config, flow, ffmpeg, directory, page, signal: callerSignal }) {
+  let signal = callerSignal ?? new AbortController().signal
+  const rawPath = join(directory, config.capture === 'native' ? 'capture.mkv' : 'capture.webm')
   const trace = { initialPointer: flow.initialPointer, moves: [], clicks: [] }
 
   signal.throwIfAborted()
-  const browser = page ? undefined : await launchBrowser(config, { handleSignals: !callerSignal })
+  let browser, native
   let clock
   let recording = false
   let failed = false
   try {
+    if (config.capture === 'native') {
+      native = await createNativeSession(config, signal, { handleSignals: !callerSignal, frameSyncOption: ffmpeg.frameSyncOption })
+      browser = native.browser
+      signal = AbortSignal.any([signal, native.signal])
+    } else {
+      browser = page ? undefined : await launchBrowser(config, { handleSignals: !callerSignal })
+    }
+    signal.throwIfAborted()
     if (browser) {
       page = await browser.newPage({ viewport: config.viewport, deviceScaleFactor: config.scale, storageState: config.storageState })
       await raceAbort(waitForReady(page, flow, config, signal), signal)
@@ -32,16 +41,18 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
       await assertPageGeometry(page, config, signal)
     }
 
-    const firstFrame = Promise.withResolvers()
     signal.throwIfAborted()
-    await startScreencast(page, rawPath, config, firstFrame.resolve)
-    recording = true
-    const frame = await withDeadline(
-      () => firstFrame.promise,
-      FIRST_FRAME_TIMEOUT,
-      new TraceframeError(`No screencast frame arrived within ${FIRST_FRAME_TIMEOUT / 1000} seconds.`, { code: 'FIRST_FRAME_TIMEOUT' }),
-      signal,
-    )
+    let frame
+    const firstFrameError = new TraceframeError(`No capture frame arrived within ${FIRST_FRAME_TIMEOUT / 1000} seconds.`, { code: 'FIRST_FRAME_TIMEOUT' })
+    if (native) {
+      frame = await withDeadline((startupSignal) => native.start(page, rawPath, startupSignal), FIRST_FRAME_TIMEOUT, firstFrameError, signal)
+      recording = true
+    } else {
+      const firstFrame = Promise.withResolvers()
+      await startScreencast(page, rawPath, config, firstFrame.resolve)
+      recording = true
+      frame = await withDeadline(() => firstFrame.promise, FIRST_FRAME_TIMEOUT, firstFrameError, signal)
+    }
     clock = frame.timestamp
     if (!browser) {
       assertFrameSize(frame, config)
@@ -62,25 +73,32 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
     }
     trace.end = (Date.now() - clock) / 1000
     await delay(config.postRoll * 1000, undefined, { signal })
+    if (native) await raceAbort(native.verify(), signal)
     // A failed stop must not be retried: Playwright may still be waiting to finish its artifact.
     recording = false
-    await page.screencast.stop()
+    await (native ? native.stop() : page.screencast.stop())
+    signal.throwIfAborted()
     return { rawPath, trace, startedAt: clock }
   } catch (error) {
     failed = true
+    if (!browser && !page) throw error
     const recordingTime = clock === undefined ? undefined : Math.max(0, (Date.now() - clock) / 1000)
     // Let the encoder finish saving before closing the browser, including on slower machines.
-    const [capturePath, screenshotPath] = await Promise.all([
-      recording ? page.screencast.stop()
-        .then(() => config.runDirectory ? retainedFile(rawPath) : undefined)
-        .catch(() => undefined) : undefined,
-      config.runDirectory && page && !signal.aborted ? saveFailureScreenshot(page, directory, signal) : undefined,
+    const [saved, screenshotPath] = await Promise.all([
+      recording ? (native ? native.stop() : page.screencast.stop())
+        .then(() => true, () => false) : false,
+      config.runDirectory && page && !callerSignal?.aborted ? saveFailureScreenshot(page, directory, callerSignal ?? new AbortController().signal) : undefined,
     ])
-    if (signal.aborted) throw error
-    throw await addDiagnostics(error, { flow: config.flow, recordingTime, capturePath, screenshotPath })
+    // A failed native sampler can still leave a finalized, useful partial capture.
+    const capturePath = config.runDirectory && (saved || (native && clock !== undefined)) ? await retainedFile(rawPath) : undefined
+    callerSignal?.throwIfAborted()
+    throw await addDiagnostics(native?.signal.aborted ? native.signal.reason : error, { flow: config.flow, recordingTime, capturePath, screenshotPath })
   } finally {
     // A shutdown error must not hide the flow failure.
-    if (browser) {
+    if (native) {
+      if (failed) await native.close().catch(() => {})
+      else await native.close()
+    } else if (browser) {
       if (failed) await browser.close().catch(() => {})
       else await browser.close()
     }

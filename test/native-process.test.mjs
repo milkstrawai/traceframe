@@ -4,8 +4,9 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import { deadline, startProcess, stopProcess } from '../src/native/process.mjs'
+import { deadline, describeExit, startProcess, stopProcess } from '../src/native/process.mjs'
 import { buildGrabber } from '../src/native/setup.mjs'
+import { createNativeSession } from '../src/native/capture.mjs'
 
 async function compilerFixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'traceframe-compiler-test-'))
@@ -67,6 +68,25 @@ test('a missing native dependency settles without an unhandled spawn error', asy
   await stopProcess(process)
 })
 
+test('native exit descriptions preserve empty-stderr exit codes and signals', async () => {
+  for (const [source, expected] of [
+    ['process.exit(23)', 'exit code 23'],
+    ["process.kill(process.pid, 'SIGKILL')", 'signal SIGKILL'],
+    ['process.exit(0)', 'exit code 0'],
+  ]) {
+    const child = startProcess(process.execPath, ['-e', source])
+    assert.equal(describeExit(await child.done), expected)
+    assert.equal(child.stderr(), '')
+  }
+})
+
+test('failed native startup releases its temporary signal handlers', async () => {
+  const signals = ['SIGINT', 'SIGTERM', 'SIGHUP']
+  const before = signals.map((name) => process.listeners(name))
+  await assert.rejects(createNativeSession({ browser: '/traceframe-missing-browser' }, undefined, { handleSignals: true }), { code: 'NATIVE_UNAVAILABLE' })
+  assert.deepEqual(signals.map((name) => process.listeners(name)), before)
+})
+
 test('an already-aborted native wait still handles a later task failure', async () => {
   const controller = new AbortController()
   const reason = new Error('Synthetic startup interruption')
@@ -85,9 +105,40 @@ test('native shutdown kills and reaps a stopped child instead of hanging', { ski
     const result = await stopProcess(child, 50)
     assert.equal(result.forced, true)
     assert.equal(result.signal, 'SIGKILL')
+    assert.equal(describeExit(result), 'signal SIGKILL, forced termination')
     assert.throws(() => process.kill(child.child.pid, 0), { code: 'ESRCH' })
   } finally {
     await stopProcess(child, 0)
+  }
+})
+
+test('default native startup handles termination while compiling', { skip: process.platform !== 'linux', timeout: 20_000 }, async (t) => {
+  for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143], ['SIGHUP', 129]]) {
+    await t.test(signal, async (t) => {
+      const fixture = await compilerFixture(t)
+      const caller = startProcess(process.execPath, ['--input-type=module', '-e', `
+        import { createNativeSession } from ${JSON.stringify(new URL('../src/native/capture.mjs', import.meta.url).href)}
+        await createNativeSession({ browser: process.execPath }, undefined, { handleSignals: true })
+      `], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] })
+      let owned
+      try {
+        owned = await fixture.started()
+        process.kill(owned.child, 0)
+        process.kill(-caller.child.pid, signal)
+        const result = await deadline(caller.done, 2_000, new Error('Startup termination did not settle.'))
+        assert.equal(result.code, code, caller.stderr())
+        await assertTerminated(owned.compiler)
+        await assertTerminated(owned.child)
+        await assert.rejects(stat(dirname(owned.output)), { code: 'ENOENT' })
+        assert.deepEqual(await readdir(dirname(dirname(owned.output))), [])
+      } finally {
+        if (owned) {
+          try { process.kill(-owned.compiler, 'SIGKILL') } catch {}
+          try { process.kill(owned.child, 'SIGKILL') } catch {}
+        }
+        await stopProcess(caller, 0)
+      }
+    })
   }
 })
 

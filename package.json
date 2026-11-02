@@ -34,7 +34,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "node --test test/*.test.mjs",
+    "test:native": "TRACEFRAME_TEST_NATIVE=1 node --test test/native.integration.test.mjs",
     "test:smoke": "node scripts/smoke.mjs",
     "test:package": "node scripts/package-smoke.mjs",
     "build:assets": "node scripts/build-assets.mjs"
