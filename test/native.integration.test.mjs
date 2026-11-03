@@ -176,14 +176,24 @@ native('capture timestamps align content, clicks, and audio despite delayed or b
       await wait(0.3)
     }, undefined, { x: 0, y: height - 1 })
     const runDirectory = join(directory, `run-${width}-${pause}`)
-    const summary = await record({ ...options, viewportWidth: width, viewportHeight: height, scale, fps, runDirectory,
+    const summary = await record({ ...options, viewportWidth: width, viewportHeight: height, scale, fps, runDirectory, nativeDiagnostics: true,
       audio: async ({ startedAt }) => { offset = (changedAt - startedAt) / 1000; return { path: sound, offset } },
     })
+    assert.ok(summary.nativeCapture.repeatedFrames > 0)
+    assert.ok(summary.nativeCapture.repeatedFrames < summary.nativeCapture.frames - 1, 'The changed background must not count as an identical sample.')
+    if (width === 1280) {
+      assert.ok(summary.nativeCapture.writeMaxMs > 300, 'Diagnostics must expose the delayed encoder read.')
+      assert.ok(summary.nativeCapture.maxSampleGapMs > 300, 'The sampler must report the gap before CFR duplication.')
+      assert.ok(summary.nativeCapture.slowIntervals > 0)
+    }
     const filter = await readFile(join(runDirectory, 'render.filter'), 'utf8')
     const clickAt = Number(/\[pulse0\]setpts=PTS-STARTPTS\+([\d.]+)\/TB/.exec(filter)[1])
     assert.ok(Math.abs(clickAt - offset) < 0.05, 'Trace and audio clocks disagree.')
     for (const path of [join(runDirectory, 'capture.mkv'), summary.output]) {
       const { stdout } = await run('ffmpeg', ['-v', 'error', '-i', path, '-vf', 'crop=2:2:iw-2:0,format=gray', '-f', 'rawvideo', 'pipe:1'], { encoding: 'buffer', maxBuffer: 1024 * 1024 })
+      if (width === 1280 && path.endsWith('capture.mkv')) {
+        assert.ok(stdout.length / 4 > summary.nativeCapture.frames + 10, 'Sampler diagnostics must exclude frames duplicated by the encoder.')
+      }
       let frame = 0
       while (frame * 4 < stdout.length && stdout[frame * 4] < 180) frame++
       assert.ok(frame * 4 < stdout.length, 'The visible action is missing.')
@@ -195,6 +205,31 @@ native('capture timestamps align content, clicks, and audio despite delayed or b
     assert.ok(Math.abs(sample / 48000 - offset) < 0.03, 'The audio marker is misaligned.')
     await assertClean(temporary, [owned])
   }
+})
+
+native('native diagnostics distinguish repeated pixels from sample cadence with default and explicit GPU policies', async (t) => {
+  const { configure, options } = await fixture(t)
+  for (const nativeGpu of [undefined, 'auto', 'disabled']) {
+    configure(async ({ page, wait }) => {
+      const cdp = await page.context().browser().newBrowserCDPSession()
+      const { processInfo } = await cdp.send('SystemInfo.getProcessInfo')
+      await cdp.detach()
+      const pid = processInfo.find((process) => process.type === 'browser').id
+      const args = (await readFile(`/proc/${pid}/cmdline`, 'utf8')).split(/[\0 ]/)
+      assert.equal(args.includes('--disable-gpu'), nativeGpu === 'disabled')
+      await wait(0.6)
+    })
+    const { nativeCapture: stats } = await record({ ...options, nativeGpu, nativeDiagnostics: true })
+    assert.equal(stats.targetFps, 30)
+    assert.ok(stats.frames > 2)
+    assert.ok(stats.sampleFps > 0)
+    assert.ok(stats.repeatedFrames >= stats.frames - 2, 'A static viewport should repeat even when sampling keeps running.')
+    assert.ok(stats.maxUnchangedMs > 300)
+    assert.ok(stats.readMaxMs >= stats.readMeanMs && stats.readMeanMs > 0)
+    assert.ok(stats.writeMaxMs >= stats.writeMeanMs && stats.writeMeanMs > 0)
+  }
+  configure(async ({ wait }) => { await wait(0.1) })
+  assert.equal((await record(options)).nativeCapture, undefined)
 })
 
 native('calibration handles page styles, root zoom, forced colors, and strict CSP without leaving markers', async (t) => {

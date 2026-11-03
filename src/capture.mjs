@@ -76,9 +76,9 @@ export async function captureFlow({ config, flow, ffmpeg, directory, page, signa
     if (native) await raceAbort(native.verify(), signal)
     // A failed stop must not be retried: Playwright may still be waiting to finish its artifact.
     recording = false
-    await (native ? native.stop() : page.screencast.stop())
+    const nativeCapture = await (native ? native.stop() : page.screencast.stop())
     signal.throwIfAborted()
-    return { rawPath, trace, startedAt: clock }
+    return { rawPath, trace, startedAt: clock, ...(native && config.nativeDiagnostics ? { nativeCapture } : {}) }
   } catch (error) {
     failed = true
     if (!browser && !page) throw error

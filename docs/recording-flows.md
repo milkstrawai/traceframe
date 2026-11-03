@@ -247,6 +247,64 @@ For an animated preview where an MP4 does not play inline, make a WebP. Not ever
 ffmpeg -i recording.mp4 -vf "fps=12,scale=1280:-1" -c:v libwebp_anim -quality 75 -loop 0 preview.webp
 ```
 
+## Investigate choppy native recordings
+
+Record a short representative segment, including fullscreen playback and any audio processing. A small animation or a windowed player does not establish fullscreen performance. Keep the raw capture so that the smooth cursor added by the renderer cannot hide repeated page frames:
+
+```sh
+traceframe record --capture native --url http://localhost:3000 --flow ./flow.mjs \
+  --native-diagnostics --native-gpu auto \
+  --run-dir .traceframe/performance --out .traceframe/performance.mp4
+```
+
+The successful CLI/API summary contains `nativeCapture` when diagnostics are enabled:
+
+| Field | Meaning |
+| --- | --- |
+| `targetFps` | Requested output rate; not a measured rate. |
+| `frames`, `sampleFps` | Completed sampler frames and `(frames − 1) / elapsed` between first and last acquisition starts. One frame reports 0 FPS. |
+| `repeatedFrames` | Samples byte-identical to the immediately preceding sample, before encoder duplication. |
+| `maxUnchangedMs` | Longest observed span from the first to last identical sample in a run; a lower bound on how long those pixels were displayed. |
+| `maxSampleGapMs`, `slowIntervals` | Largest interval between acquisition starts, and count exceeding 1.5 times the requested frame period. |
+| `readMeanMs`, `readMaxMs` | Time waiting for XShm to read the display, including scheduling and display-server work. |
+| `writeMeanMs`, `writeMaxMs` | Time writing a timestamped frame to the encoder pipe, including backpressure and scheduling. |
+
+These are aggregate measurements of the sampler, not browser presentation timestamps or end-to-end latency. A static page should repeat; a 30 FPS video captured at 60 FPS should also repeat. Conversely, a small animation elsewhere on the page can make every full-frame comparison differ while the video remains frozen. Inspect the video region in the retained capture, especially during known motion. Do not use `repeatedFrames` as a pass/fail threshold for arbitrary pages.
+
+For a video element, measure `requestVideoFrameCallback` alongside `getVideoPlaybackQuality()` over the same segment. Count callbacks **and** the change in their `presentedFrames` counter: callbacks run on the main thread and can be skipped even when the compositor presents frames. Use wall-clock time, not `mediaTime` differences, for the observed rate. This flow-side probe measures a five-second window without retaining page content:
+
+```js
+const videoCadence = await page.locator('video').first().evaluate(video => new Promise(resolve => {
+  const before = video.getVideoPlaybackQuality()
+  const start = performance.now()
+  let callbacks = 0, first, last, previous, maxGapMs = 0, pending
+  const frame = (now, metadata) => {
+    callbacks++
+    first ??= { now, count: metadata.presentedFrames }
+    last = { now, count: metadata.presentedFrames }
+    if (previous !== undefined) maxGapMs = Math.max(maxGapMs, now - previous)
+    previous = now
+    pending = video.requestVideoFrameCallback(frame)
+  }
+  pending = video.requestVideoFrameCallback(frame)
+  setTimeout(() => {
+    video.cancelVideoFrameCallback(pending)
+    const after = video.getVideoPlaybackQuality()
+    resolve({
+      callbackFps: callbacks / ((performance.now() - start) / 1000),
+      presentedFps: last?.now > first?.now ? (last.count - first.count) * 1000 / (last.now - first.now) : null,
+      maxGapMs,
+      droppedFrames: after.droppedVideoFrames - before.droppedVideoFrames,
+    })
+  }, 5000)
+}))
+console.error(videoCadence)
+```
+
+Repeat with `--native-gpu disabled`, a smaller output (`--scale 1`), and audio processing disabled in the application, changing one setting at a time. To isolate capture overhead, run the same browser workload without starting capture as well. On a Traceframe-owned page, a browser CDP session's `SystemInfo.getInfo` exposes `gpu.auxAttributes.glRenderer` and `gpu.featureStatus`; check these rather than assuming `auto` selected a physical GPU. The CPU encoder is unchanged by this setting.
+
+Opt-in diagnostics copy/compare one raw frame per sample (about 24 MB per frame at 3024×1964), so compare diagnostic and ordinary runs before drawing performance conclusions. No per-frame image hashes or pixels are included in the summary. Diagnostics are returned after successful capture/rendering; a forcibly killed sampler cannot provide a complete report. Traceframe does not automatically change settings, declare a take smooth, or replay a flow based on these measurements.
+
 ## Optional sharing
 
 With push access to a repository, current [GitHub CLI](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli) can attach the MP4 to a comment so it plays there; check `gh pr comment --help` for your version. An MP4 hosted elsewhere shows as a link, not a player, so use the WebP preview there. Upload only when asked and after checking that the recording suits the destination; recording itself uploads nothing.

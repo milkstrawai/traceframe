@@ -22,6 +22,10 @@ export function createConfig(options = {}) {
   check(Number.isFinite(readyTimeout) && readyTimeout > 0, 'Ready timeout must be more than 0 seconds.')
   const capture = options.capture ?? 'playwright'
   check(capture === 'playwright' || capture === 'native', 'Capture must be playwright or native.')
+  const nativeGpu = options.nativeGpu ?? 'auto'
+  check(nativeGpu === 'auto' || nativeGpu === 'disabled', 'Native GPU must be auto or disabled.')
+  check(options.nativeDiagnostics === undefined || typeof options.nativeDiagnostics === 'boolean', 'Native diagnostics must be a boolean.')
+  check(capture === 'native' || (options.nativeGpu === undefined && options.nativeDiagnostics === undefined), 'Native GPU and diagnostics options require native capture.')
   if (capture === 'native') {
     check(process.platform === 'linux', 'Native capture is supported only on Linux.')
     check(viewport.width >= 8 && viewport.height >= 8, 'Native capture needs a viewport of at least 8×8 CSS pixels.')
@@ -30,6 +34,8 @@ export function createConfig(options = {}) {
   return {
     ...recordingConfig(options, viewport, preset),
     capture,
+    nativeGpu,
+    nativeDiagnostics: options.nativeDiagnostics ?? false,
     url: options.url,
     flow: resolve(options.flow),
     storageState: options.storageState,
@@ -45,7 +51,7 @@ export function createPageConfig(options = {}) {
   const viewport = page.viewportSize()
   check(viewport, 'recordPage requires a fixed viewport. Set it when creating the page or context; viewport: null is not supported.')
   check(options.capture === undefined || options.capture === 'playwright', 'recordPage supports only playwright capture. Native capture requires a browser launched by record or the CLI.')
-  for (const key of ['url', 'browser', 'storageState', 'readyTimeout', 'viewportWidth', 'viewportHeight', 'preset']) {
+  for (const key of ['url', 'browser', 'nativeGpu', 'nativeDiagnostics', 'storageState', 'readyTimeout', 'viewportWidth', 'viewportHeight', 'preset']) {
     check(options[key] === undefined, `recordPage does not accept ${key}; prepare the page before recording and use scale/fps for video settings.`)
   }
   return recordingConfig(options, viewport, { scale: 1, fps: 30 })

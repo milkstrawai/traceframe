@@ -16,6 +16,8 @@ const OPTION_KEYS = {
   preset: 'preset',
   browser: 'browser',
   capture: 'capture',
+  'native-gpu': 'nativeGpu',
+  'native-diagnostics': 'nativeDiagnostics',
   'storage-state': 'storageState',
   'viewport-width': 'viewportWidth',
   'viewport-height': 'viewportHeight',
@@ -41,6 +43,8 @@ Options:
                                draft: 1280x800 CSS viewport, 1280x800 at 30 FPS
   --browser <path>             Chromium executable (or set CHROME_PATH)
   --capture <playwright|native> Capture backend (default: playwright); native is opt-in on Linux
+  --native-gpu <auto|disabled>  Native browser GPU policy (default: auto)
+  --native-diagnostics         Include sampler cadence, repeats and delays in the JSON summary
   --storage-state <path>       Playwright storage state JSON
   --viewport-width <pixels>    CSS viewport width
   --viewport-height <pixels>   CSS viewport height
@@ -101,7 +105,7 @@ function parseCommand(args) {
     options: {
       help: { type: 'boolean', short: 'h' },
       version: { type: 'boolean', short: 'v' },
-      ...Object.fromEntries(Object.keys(OPTION_KEYS).map((name) => [name, { type: 'string' }])),
+      ...Object.fromEntries(Object.keys(OPTION_KEYS).map((name) => [name, { type: name === 'native-diagnostics' ? 'boolean' : 'string' }])),
     },
   })
   if (values.help || args.length === 0) return { help: true }

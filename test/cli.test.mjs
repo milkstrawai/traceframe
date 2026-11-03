@@ -38,6 +38,9 @@ test('passes --out and numeric options through to the configuration', async () =
 test('documents and validates the opt-in capture backend', async () => {
   assert.match((await run('--help')).stdout, /--capture <playwright\|native>/)
   assert.match((await run('record', ...flowArgs, '--capture', 'unknown')).stderr, /Capture must be playwright or native/)
+  assert.match((await run('--help')).stdout, /--native-gpu <auto\|disabled>.*default: auto/)
+  assert.match((await run('record', ...flowArgs, '--native-diagnostics')).stderr, /require native capture/)
+  assert.match((await run('record', ...flowArgs, '--capture', 'native', '--native-gpu', 'hardware')).stderr, /auto or disabled/)
 })
 
 test('parses audio settings and explains incomplete or invalid offsets', async () => {

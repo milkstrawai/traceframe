@@ -94,7 +94,7 @@ async function openSession(config, signal, { handleSignals, frameSyncOption }) {
       host: '127.0.0.1',
       artifactsDir: join(directory, 'artifacts'),
       env,
-      args: [`--display=${display}`, '--ozone-platform=x11', `--force-device-scale-factor=${config.scale}`, '--kiosk', '--start-fullscreen', '--disable-gpu', '--hide-scrollbars', '--mute-audio'],
+      args: [`--display=${display}`, '--ozone-platform=x11', `--force-device-scale-factor=${config.scale}`, '--kiosk', '--start-fullscreen', ...(config.nativeGpu === 'disabled' ? ['--disable-gpu'] : []), '--hide-scrollbars', '--mute-audio'],
       timeout: 10_000,
       handleSIGINT: handleSignals, handleSIGTERM: handleSignals, handleSIGHUP: handleSignals,
     }).catch((cause) => {
@@ -156,7 +156,7 @@ async function openSession(config, signal, { handleSignals, frameSyncOption }) {
           '-an', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '0', '-pix_fmt', 'yuv444p', '-threads', '4', frameSyncOption, 'cfr', '-r', String(config.video.fps), '-f', 'matroska', path,
         ], { stdio: ['pipe', 'ignore', 'pipe'] }), 'The native encoder')
         encoder.child.stdin.on('error', (error) => fail(failure('The native encoder stopped accepting frames.', error)))
-        sampler = watch(startProcess(grabber, [...parent, String(config.video.width), String(config.video.height), String(origin.x), String(origin.y), String(config.video.fps)], { env, stdio: ['ignore', encoder.child.stdin, 'pipe'] }), 'The native sampler')
+        sampler = watch(startProcess(grabber, [...parent, ...(config.nativeDiagnostics ? ['--diagnostics'] : []), String(config.video.width), String(config.video.height), String(origin.x), String(origin.y), String(config.video.fps)], { env, stdio: ['ignore', encoder.child.stdin, 'pipe'] }), 'The native sampler')
         const first = Promise.withResolvers()
         let metadata = ''
         const onFrame = (chunk) => {
@@ -187,6 +187,11 @@ async function openSession(config, signal, { handleSignals, frameSyncOption }) {
             throw failure(`${error.message} Encoder: ${describeExit(stopped)}. ${encoder.stderr()}`, error)
           }
           if (sampled.forced || sampled.code !== 0 || encoded.code !== 0) throw failure(`Native capture did not finish successfully. Sampler: ${describeExit(sampled)}. ${sampler.stderr()} Encoder: ${describeExit(encoded)}. ${encoder.stderr()}`, sampled.error ?? encoded.error)
+          if (config.nativeDiagnostics) {
+            const line = /^STATS (.+)$/m.exec(sampler.stderr())
+            if (!line) throw failure('The native sampler did not report capture diagnostics.')
+            return { targetFps: config.video.fps, ...JSON.parse(line[1]) }
+          }
         })()
         return stopCapture
       },

@@ -129,9 +129,11 @@ int main(int argc, char **argv) {
     perror(argv[2]);
     return 1;
   }
+  int diagnostics = argc > 1 && strcmp(argv[1], "--diagnostics") == 0;
+  if (diagnostics) { argc--; argv++; }
   int locate = argc == 5 && strcmp(argv[1], "--locate") == 0;
   if (!locate && argc != 6) {
-    fprintf(stderr, "Usage: grab WIDTH HEIGHT X Y FPS | grab --locate WIDTH HEIGHT SCALE\n");
+    fprintf(stderr, "Usage: grab [--diagnostics] WIDTH HEIGHT X Y FPS | grab --locate WIDTH HEIGHT SCALE\n");
     return 1;
   }
   int width = integer(argv[locate ? 2 : 1], 1);
@@ -150,6 +152,7 @@ int main(int argc, char **argv) {
   XShmSegmentInfo shared = { .shmid = -1, .shmaddr = (char *)-1 };
   XImage *image = XShmCreateImage(display, DefaultVisual(display, screen), DefaultDepth(display, screen), ZPixmap, NULL, &shared, image_width, image_height);
   int result = 1, attached = 0;
+  unsigned char *previous = NULL;
   if (!image || image->bits_per_pixel != 32 || image->byte_order != LSBFirst ||
       image->red_mask != 0xff0000 || image->green_mask != 0x00ff00 || image->blue_mask != 0x0000ff ||
       image->bytes_per_line != image_width * 4) {
@@ -206,19 +209,42 @@ int main(int argc, char **argv) {
     goto cleanup;
   }
   if (!write_header(width, height, rate)) goto cleanup;
+  if (diagnostics) {
+    previous = malloc(size);
+    if (!previous) { perror("malloc"); goto cleanup; }
+  }
   long long next = now(CLOCK_MONOTONIC), origin = 0;
+  long long first_sample = 0, last_sample = 0, max_gap = 0, held_since = 0, max_held = 0;
+  long long read_total = 0, read_max = 0, write_total = 0, write_max = 0;
+  int repeated = 0, long_gaps = 0;
   int frames = 0;
   result = 0;
   while (!stopped) {
     struct timespec time = { next / 1000000000LL, next % 1000000000LL };
     while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &time, NULL) == EINTR && !stopped) {}
     if (stopped) break;
+    long long sampled_at = diagnostics ? now(CLOCK_MONOTONIC) : 0;
     long long timestamp = now(CLOCK_REALTIME);
     if (!frames) origin = timestamp;
     if (!XShmGetImage(display, DefaultRootWindow(display), image, x, y, AllPlanes)) {
       fprintf(stderr, "Cannot read the captured page.\n");
       result = 1;
       break;
+    }
+    if (diagnostics) {
+      long long elapsed = now(CLOCK_MONOTONIC) - sampled_at;
+      read_total += elapsed;
+      if (elapsed > read_max) read_max = elapsed;
+      if (frames) {
+        long long gap = sampled_at - last_sample;
+        if (gap > max_gap) max_gap = gap;
+        if (gap > 1500000000LL / rate) long_gaps++;
+        if (memcmp(previous, image->data, size) == 0) repeated++;
+        else held_since = sampled_at;
+      } else first_sample = held_since = sampled_at;
+      if (sampled_at - held_since > max_held) max_held = sampled_at - held_since;
+      last_sample = sampled_at;
+      memcpy(previous, image->data, size);
     }
     unsigned char prefix[64];
     size_t cluster = element_header(prefix, 0x1f43b675, 0);
@@ -228,14 +254,31 @@ int main(int argc, char **argv) {
     length += 4;
     element_header(prefix, 0x1f43b675, length - cluster + size);
     // Finish the current frame on SIGTERM; a partial frame corrupts the take.
+    long long writing_at = diagnostics ? now(CLOCK_MONOTONIC) : 0;
     if (!write_bytes(prefix, length) || !write_bytes(image->data, size)) { result = 1; goto cleanup; }
+    if (diagnostics) {
+      long long elapsed = now(CLOCK_MONOTONIC) - writing_at;
+      write_total += elapsed;
+      if (elapsed > write_max) write_max = elapsed;
+    }
     if (frames++ == 0) fprintf(stderr, "FRAME %.6f\n", timestamp / 1e6);
     next += 1000000000LL / rate;
     long long current = now(CLOCK_MONOTONIC);
     if (next < current) next = current;
   }
+  if (diagnostics) {
+    // Only aggregate counters leave the sampler. No pixels or per-frame logs.
+    fprintf(stderr, "STATS {\"frames\":%d,\"sampleFps\":%.3f,\"repeatedFrames\":%d,"
+      "\"maxUnchangedMs\":%.3f,\"maxSampleGapMs\":%.3f,\"slowIntervals\":%d,"
+      "\"readMeanMs\":%.3f,\"readMaxMs\":%.3f,\"writeMeanMs\":%.3f,\"writeMaxMs\":%.3f}\n",
+      frames, frames > 1 ? (frames - 1) * 1e9 / (last_sample - first_sample) : 0,
+      repeated, max_held / 1e6, max_gap / 1e6, long_gaps,
+      frames ? read_total / 1e6 / frames : 0, read_max / 1e6,
+      frames ? write_total / 1e6 / frames : 0, write_max / 1e6);
+  }
 
 cleanup:
+  free(previous);
   if (attached) { XShmDetach(display, &shared); XSync(display, False); }
   if (image) { image->data = NULL; XDestroyImage(image); }
   if (shared.shmaddr != (char *)-1) shmdt(shared.shmaddr);

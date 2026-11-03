@@ -40,6 +40,21 @@ test('sizes the video as the viewport times the scale', () => {
   assert.deepEqual(config.video, { width: 2560, height: 1600, fps: 30 })
 })
 
+test('native launch and diagnostics settings are explicit and native-only', () => {
+  for (const options of [{ nativeGpu: 'auto' }, { nativeDiagnostics: true }]) {
+    assert.throws(() => createConfig({ ...base, ...options }), /require native capture/)
+    assert.throws(() => createPageConfig({ page, ...options }), /does not accept/)
+  }
+  if (process.platform !== 'linux') return
+  const native = { ...base, capture: 'native' }
+  assert.equal(createConfig(native).nativeGpu, 'auto')
+  assert.equal(createConfig({ ...native, nativeGpu: 'disabled' }).nativeGpu, 'disabled')
+  assert.equal(createConfig(native).nativeDiagnostics, false)
+  assert.equal(createConfig({ ...native, nativeGpu: 'auto', nativeDiagnostics: true }).nativeDiagnostics, true)
+  assert.throws(() => createConfig({ ...native, nativeGpu: 'hardware' }), /auto or disabled/)
+  assert.throws(() => createConfig({ ...native, nativeDiagnostics: 'true' }), /must be a boolean/)
+})
+
 test('rejects unsupported frame rates, negative post-roll lengths, and zero flow timeouts', () => {
   assert.throws(() => createConfig({ ...base, fps: 24 }), /FPS must be 30 or 60/)
   assert.throws(() => createConfig({ ...base, postRoll: -1 }), /Post-roll must be 0 or more seconds/)
