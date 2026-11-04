@@ -1,5 +1,6 @@
 node_modules/
 *.webm
+*.mkv
 *.mp4
 .traceframe/
 .auth/
