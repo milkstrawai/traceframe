@@ -52,7 +52,7 @@ test('rejects FIFO audio before ffprobe can wait for a writer', { timeout: 10_00
   }
 })
 
-test('waits for an aborted command to exit before rejecting', async () => {
+test('waits for an aborted command to exit before rejecting', { skip: process.platform === 'win32' }, async () => {
   const controller = new AbortController()
   const slowToExit = "process.on('SIGTERM', () => setTimeout(() => process.exit(), 500)); setInterval(() => {}, 1000)"
   const running = runCommand(process.execPath, ['-e', slowToExit], { signal: controller.signal })

@@ -11,11 +11,12 @@ permissions:
 
 jobs:
   test:
-    name: Node ${{ matrix.node }}
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} / Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
         node: [22, 24]
 
     steps:
@@ -34,16 +35,47 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps --only-shell chromium
 
-      - name: Install FFmpeg
+      - name: Install FFmpeg on Linux
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install --yes ffmpeg
 
+      - name: Install FFmpeg on macOS
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      - name: Install FFmpeg on Windows
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --yes --no-progress
+
       - name: Run tests
-        run: npm test
+        run: npm test -- --test-concurrency=2
 
       - name: Run standard capture smoke test
+        if: matrix.node == 24
         run: npm run test:smoke
         env:
           TRACEFRAME_PRESET: standard
 
       - name: Install and run the packed package
+        if: matrix.node == 24
         run: npm run test:package
+
+  ffmpeg-compatibility:
+    name: FFmpeg ${{ matrix.ffmpeg }} compatibility
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ffmpeg: 5
+            image: node:22-bookworm
+          - ffmpeg: 7
+            image: node:22-trixie
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: apt-get update && apt-get install --yes ffmpeg
+      - run: npm ci
+      - run: npx playwright install --with-deps --only-shell chromium
+      - name: Verify timestamps, colors, sparse overlays and audio
+        run: node --test --test-concurrency=2 test/jpeg-capture.test.mjs test/render.test.mjs test/sparse-render.test.mjs test/audio.integration.test.mjs

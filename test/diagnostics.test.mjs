@@ -31,13 +31,16 @@ not a frame ${flow}:99:99`
   assert.doesNotMatch(JSON.stringify(error.diagnostics), /private|synthetic|internal/)
 })
 
-test('matches canonical stack paths when the flow was loaded through a symlink', async () => {
+test('matches canonical stack paths when the flow was loaded through a symlink', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'traceframe-locations-'))
   try {
     const path = join(directory, 'actual.mjs')
     const alias = join(directory, 'alias.mjs')
     await writeFile(path, '')
-    await symlink(path, alias)
+    try { await symlink(path, alias) } catch (error) {
+      if (process.platform === 'win32' && error.code === 'EPERM') return t.skip('File symlinks require Windows developer mode or elevation.')
+      throw error
+    }
     const error = new Error('failed')
     error.stack = `Error: failed\n    at default (${pathToFileURL(path).href}:4:5)`
     await addDiagnostics(error, { flow: alias })
@@ -65,7 +68,7 @@ test('formats only the original message, Traceframe code and selected diagnostic
   error.diagnostics = {
     flowLocations: [{ file: '/example/flow.mjs', line: 4, column: 9 }],
     recordingTime: 12.345,
-    capturePath: '/example/run/capture.webm',
+    capturePath: '/example/run/capture.mkv',
     screenshotPath: '/example/run/failure.png',
     extra: 'synthetic private extra detail',
   }
@@ -75,7 +78,7 @@ Call log:
   - waiting for Saved
   Flow: /example/flow.mjs:4:9
   Recording time: 12.35 s
-  Capture: /example/run/capture.webm
+  Capture: /example/run/capture.mkv
   Screenshot: /example/run/failure.png
 `)
 })
@@ -90,6 +93,6 @@ test('omits unavailable diagnostics and keeps ordinary usage errors concise', ()
 
 test('callback errors retain timing and artifacts without inventing source locations', async () => {
   const error = new Error('callback failed')
-  await addDiagnostics(error, { recordingTime: 0.4, capturePath: '/example/capture.webm' })
-  assert.deepEqual(error.diagnostics, { flowLocations: [], recordingTime: 0.4, capturePath: '/example/capture.webm' })
+  await addDiagnostics(error, { recordingTime: 0.4, capturePath: '/example/capture.mkv' })
+  assert.deepEqual(error.diagnostics, { flowLocations: [], recordingTime: 0.4, capturePath: '/example/capture.mkv' })
 })
