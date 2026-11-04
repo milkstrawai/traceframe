@@ -20,7 +20,11 @@ export async function probeFfmpeg({ audio = false } = {}) {
     throw new TraceframeError('System FFmpeg does not provide the AAC encoder required for audio.', { code: 'FFMPEG_UNSUPPORTED' })
   }
   await runCommand('ffprobe', ['-version'])
-  return { filterComplexFileOption: filterComplexFileOption(major) }
+  return {
+    filterComplexFileOption: filterComplexFileOption(major),
+    // FFmpeg 7's pass mode cuts off padded main-video frames at the original EOF.
+    overlayEofAction: major === 7 ? 'repeat' : 'pass',
+  }
 }
 
 export async function probeAudio(path, signal) {
