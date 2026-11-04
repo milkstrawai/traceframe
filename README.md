@@ -8,13 +8,13 @@ https://github.com/user-attachments/assets/38e02cd5-a9ba-4f3c-938c-159955353141
 
 ## Prerequisites
 
-Traceframe requires Node.js 22+ and system FFmpeg 5+ with `libx264` and `ffprobe` to render the MP4 (for example, `brew install ffmpeg` or `sudo apt install ffmpeg`). Playwright uses its own Chromium and FFmpeg builds to record the page. Install them with the exact Playwright version Traceframe uses; other cached versions are not used:
+Traceframe requires Node.js 22+ and system FFmpeg 5+ with `libx264` and `ffprobe` to render the MP4 (for example, `brew install ffmpeg` or `sudo apt install ffmpeg`). Install Chromium with the exact Playwright version Traceframe uses; other cached versions are not used:
 
 ```sh
-npx playwright@1.64.1 install --only-shell chromium ffmpeg
+npx playwright@1.64.1 install --only-shell chromium
 ```
 
-To use system Chrome 150 or later, pass `--browser` or set `CHROME_PATH`, and install Playwright's recording FFmpeg with `npx playwright@1.64.1 install ffmpeg`. Older Chrome versions can fail to scroll targets inside panels.
+To use system Chrome 150 or later, pass `--browser` or set `CHROME_PATH`. Older Chrome versions can fail to scroll targets inside panels. Recording uses Playwright's frame callback and does not require its separate FFmpeg executable.
 
 In a sandbox, such as a coding agent's, allow Playwright's browser download and let Chromium start.
 
@@ -59,7 +59,19 @@ Both presets use a 1280×800 CSS viewport. `draft` produces 1280×800 at 30 FPS;
 
 The cursor and click pulses are always drawn at the full frame rate. Chromium may capture page changes, such as scrolling and animations, at a lower rate at 2560×1600, depending on the machine. The video repeats the last page frame until the next one arrives.
 
-Use `--run-dir .traceframe/runs/name` (`runDirectory` in the API) to keep the raw capture and FFmpeg filter file, including a partial capture if the flow fails during recording. On a preparation or recording failure, Traceframe also tries to save a viewport screenshot as `failure.png`. Keep that directory out of Git, because captures and screenshots can contain private page data.
+Use `--capture-diagnostics` (`captureDiagnostics: true` with `record` or `recordPage`) to include `captureStats` in the result. It reports received frames, their timestamp span and rate, the largest forward timestamp jumps and delivery gaps, and out-of-order timestamps. `lateFrames` counts frames older than the first received frame or the last written frame; `overflowFrames` counts frames dropped at the 64 MiB capture-buffer limit, and `maxBufferedBytes` reports its peak use. `writeWaitMs` and `maxWriteWaitMs` measure total and maximum time waiting for frame-write callbacks, including the final static frame; they do not measure durable disk writes. Slow writes can delay frame acknowledgments and reduce what Chromium sends, even when the writer drop counters stay at zero. These measurements describe frames delivered by Chromium. They do not count distinct pictures or prove smoothness; a static page legitimately delivers few frames, and a 30 FPS video cannot supply 60 distinct source frames per second.
+
+`--capture-quality <1–100>` (`captureQuality` in either API) controls the JPEG frames exported by Chromium; the default remains 95. A lower setting such as 80 can reduce frame-export and transfer cost, with a loss of image detail. This is separate from the final MP4 encoder. Check representative moving content and text at the intended resolution before choosing it.
+
+Since v0.6.0, the retained raw file is `capture.mkv` instead of `capture.webm`; update scripts that inspect it. Final output remains MP4.
+
+Traceframe saves Chromium's JPEG frames and presentation timestamps directly into a temporary `capture.mkv`, then encodes the final MP4 after the flow ends. This avoids a live intermediate video encode and works with CPU or GPU browser rendering. Chromium frame timestamps are retained with millisecond precision; a 150 ms buffer orders delayed arrivals. The first received frame establishes the audio clock, so subsequently delivered frames older than that origin are dropped. Slow storage applies backpressure. Moving content needs more temporary disk space than an inter-frame codec: at high resolution, allow hundreds of megabytes for short takes and potentially gigabytes for longer ones. Static pages need only a few stored frames. If your temporary directory is backed by RAM, choose a disk-backed `--run-dir` for large takes and remove it afterward. The final renderer supplies the requested frame rate before drawing the cursor.
+
+GPU rendering and hardware video decoding can help the browser, but frame export still costs CPU. The bundled headless browser used software rendering on the tested Linux setup; selecting an executable or adding a GPU flag does not guarantee acceleration. For a caller-owned browser, configure and verify its GPU use before `recordPage`; use full Chromium for extensions. A GPU capability flag alone does not establish that the active video is hardware-decoded. When measuring performance, keep the browser version, source codec, viewport and device scale fixed, and compare recorded image updates and audio timing as well as file metadata.
+
+Start performance comparisons with the Chromium build bundled with Playwright. A custom `--browser` executable can have different screencast performance even when recording succeeds. Traceframe preserves your requested resolution and quality. If the workload cannot sustain the desired cadence, increasing the encoded FPS repeats existing frames; choose a lower quality or smaller dimensions explicitly if that tradeoff suits your recording.
+
+Use `--run-dir .traceframe/runs/name` (`runDirectory` in the API) to keep the raw capture and FFmpeg filter file, including a partial capture if the flow fails during recording. An interrupted or failed capture can be incomplete; a retained file is not proof that recording finalized successfully. On a preparation or recording failure, Traceframe also tries to save a viewport screenshot as `failure.png`. Keep that directory out of Git, because captures and screenshots can contain private page data.
 
 When available, failure output includes the error code, flow-file locations, elapsed recording time, and paths to artifacts saved for that attempt. Without `--run-dir`, temporary captures are removed and no failure screenshot is saved. See [diagnosing a failed take](docs/recording-flows.md#diagnose-a-failed-take).
 
@@ -178,9 +190,9 @@ For 2× frames, launch the caller's browser with `chromium.launch({ args: ['--fo
 
 Keep the viewport, zoom and visual scale fixed and the page open until `recordPage` settles; geometry is checked only at startup. Only that page is recorded; a tab closed during a take may lose its capture. Use the page exclusively for recording: concurrent screencasts, context `recordVideo` and tracing with screenshots can change frame dimensions or supply stale frames. A size check cannot detect every conflict. Overlapping `recordPage` calls on the same page reject with `PAGE_RECORDING_ACTIVE`.
 
-Await every helper. Helpers observe cancellation before further pointer or scroll actions, and release a mouse button that was already pressed; an already-issued action may still complete. Arbitrary callback code must cooperate with `signal`, including passing it to supported Playwright operations. A flow timeout does not forcibly terminate that code. Sequential takes are supported after a successful screencast stop, including ordinary flow failures and cooperative cancellation. If Playwright's FFmpeg is missing, Traceframe stops the partial capture before rejecting. Other startup or stop failures may need a new page or context; Traceframe leaves that recovery to the caller and does not stop a pre-existing caller screencast.
+Await every helper. Helpers observe cancellation before further pointer or scroll actions, and release a mouse button that was already pressed; an already-issued action may still complete. Arbitrary callback code must cooperate with `signal`, including passing it to supported Playwright operations. A flow timeout does not forcibly terminate that code. Sequential takes are supported after a successful screencast stop, including ordinary flow failures and cooperative cancellation. Startup or stop failures may need a new page or context; Traceframe leaves that recovery to the caller and does not stop a pre-existing caller screencast.
 
-Traceframe removes its own temporary outputs unless `runDirectory` is supplied. Playwright keeps original WebMs in its browser artifacts directory until the caller closes the browser, even after a take has been saved. For extension pages, use full Chromium; the headless shell alone does not load extensions. This path was checked on Linux with Playwright 1.64.1 and its bundled full Chromium using a synthetic extension.
+Traceframe removes its temporary capture unless `runDirectory` is supplied. For extension pages, use full Chromium; the headless shell alone does not load extensions. This path was checked on Linux with Playwright 1.64.1 and its bundled full Chromium using a synthetic extension.
 
 ### Add audio
 
@@ -195,7 +207,7 @@ npx @milkstraw/traceframe record --url http://localhost:3000 --flow ./flow.mjs \
 
 The input must be a local file, such as WAV, MP3, M4A or audio WebM. Static inputs are checked before browser recording, so a missing file or missing audio stream cannot waste a take (`AUDIO_INVALID`). After capture, an audio start at or after the video's end rejects with `AUDIO_OUTSIDE_VIDEO`. A negative offset that discards the entire source produces a silent audio track.
 
-Traceframe reads the file without modifying or deleting it; use an input path different from the output and the reserved files in `runDirectory` (`capture.webm`, `render.filter`, `failure.png`). Keep recordings in an ignored directory.
+Traceframe reads the file without modifying or deleting it; use an input path different from the output and the reserved files in `runDirectory` (`capture.mkv`, legacy `capture.webm`, `render.filter`, `failure.png`). Keep recordings in an ignored directory.
 
 For audio recorded alongside the flow, supply an async function instead. It runs once after successful capture and post-roll, before rendering, so it can finalize the external recorder and return its file. `startedAt` is the first video frame's timestamp in epoch milliseconds:
 
@@ -228,11 +240,11 @@ When available, `error.diagnostics` contains:
 | `capturePath` | Absolute path to the retained raw capture, only when `runDirectory` was supplied and saving succeeded. |
 | `screenshotPath` | Absolute path to the saved failure screenshot, only when `runDirectory` was supplied and the screenshot succeeded. |
 
-A flow timeout may have no flow location because it is raised outside the blocked operation. Screenshots are best effort and have a five-second collection budget. Partial captures are saved before browser shutdown, with no fixed time limit so slower encoders can finish. Diagnostic failures do not replace the original error.
+A flow timeout may have no flow location because it is raised outside the blocked operation. Screenshots are best effort and have a five-second collection budget. Partial captures are flushed before browser shutdown, with no fixed time limit so slower storage can finish. Diagnostic failures do not replace the original error.
 
 Pass `signal` to stop a recording early. Traceframe stops its recording/rendering work and removes its temporary files before rejecting with the signal's reason. `record` also closes its browser; `recordPage` leaves the caller's browser open. When you pass a signal, Traceframe leaves Ctrl-C and other termination signals to you. The CLI does this for you: the first Ctrl-C stops and cleans up, and a second one exits at once.
 
-A stuck recording encoder can delay saving and cancellation indefinitely. A second Ctrl-C forces the CLI to exit and can discard the unfinished capture. API callers that need a hard shutdown deadline should run recording in a separate process they can terminate.
+A stalled storage device can delay flushing and cancellation. A second Ctrl-C forces the CLI to exit and can discard unfinished writes. API callers that need a hard shutdown deadline should run recording in a separate process they can terminate.
 
 ## Sample output
 

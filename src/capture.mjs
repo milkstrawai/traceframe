@@ -7,21 +7,30 @@ import { chromium } from 'playwright'
 import { TraceframeError } from './errors.mjs'
 import { addDiagnostics, retainedFile } from './diagnostics.mjs'
 import { createFlowApi } from './flow.mjs'
+import { createCaptureStats } from './capture-stats.mjs'
+import { createJpegCapture } from './jpeg-capture.mjs'
 
 const PLAYWRIGHT_DEFAULT_TIMEOUT = 30_000
 const FIRST_FRAME_TIMEOUT = 10_000
 const FAILURE_SCREENSHOT_TIMEOUT = 5_000
 
 export async function captureFlow({ config, flow, directory, page, signal: callerSignal }) {
-  const signal = callerSignal ?? new AbortController().signal
-  const rawPath = join(directory, 'capture.webm')
+  const captureErrors = new AbortController()
+  const signal = callerSignal ? AbortSignal.any([callerSignal, captureErrors.signal]) : captureErrors.signal
+  const rawPath = join(directory, 'capture.mkv')
   const trace = { initialPointer: flow.initialPointer, moves: [], clicks: [] }
+  const stats = config.captureDiagnostics ? createCaptureStats() : undefined
 
   signal.throwIfAborted()
   const browser = page ? undefined : await launchBrowser(config, { handleSignals: !callerSignal })
   let clock
   let recording = false
   let failed = false
+  let capture
+  async function stopCapture() {
+    const stoppedAt = Date.now()
+    try { await page.screencast.stop() } finally { await capture?.stop(stoppedAt) }
+  }
   try {
     if (browser) {
       page = await browser.newPage({ viewport: config.viewport, deviceScaleFactor: config.scale, storageState: config.storageState })
@@ -34,7 +43,12 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
 
     const firstFrame = Promise.withResolvers()
     signal.throwIfAborted()
-    await startScreencast(page, rawPath, config, firstFrame.resolve)
+    capture = createJpegCapture(rawPath, { ...config.video, onError: cause => captureErrors.abort(new TraceframeError(`Could not save capture: ${cause.message}`, { code: 'CAPTURE_FAILED', cause })) })
+    await page.screencast.start({ size: { width: config.video.width, height: config.video.height }, fps: config.video.fps, quality: config.captureQuality, onFrame: (frame) => {
+      stats?.observe(frame.timestamp, performance.now())
+      firstFrame.resolve(frame)
+      return capture.append(frame)
+    } })
     recording = true
     const frame = await withDeadline(
       () => firstFrame.promise,
@@ -43,8 +57,8 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
       signal,
     )
     clock = frame.timestamp
+    assertFrameSize(frame, config)
     if (!browser) {
-      assertFrameSize(frame, config)
       signal.throwIfAborted()
       // Rejected caller-page attempts must leave the caller's pointer alone.
       await page.mouse.move(trace.initialPointer.x, trace.initialPointer.y)
@@ -62,23 +76,27 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
     }
     trace.end = (Date.now() - clock) / 1000
     await delay(config.postRoll * 1000, undefined, { signal })
-    // A failed stop must not be retried: Playwright may still be waiting to finish its artifact.
+    // Stop the page subscription only once, including when shutdown fails.
     recording = false
-    await page.screencast.stop()
-    return { rawPath, trace, startedAt: clock }
+    await stopCapture()
+    return { rawPath, trace, startedAt: clock, ...(stats ? { captureStats: { ...stats.summary(), ...capture.stats } } : {}) }
   } catch (error) {
     failed = true
+    // A writer failure during cleanup must not replace the initiating failure.
+    const failure = signal.aborted ? signal.reason : error
     const recordingTime = clock === undefined ? undefined : Math.max(0, (Date.now() - clock) / 1000)
-    // Let the encoder finish saving before closing the browser, including on slower machines.
+    // Flush captured frames before closing the browser, including on slower disks.
     const [capturePath, screenshotPath] = await Promise.all([
-      recording ? page.screencast.stop()
-        .then(() => config.runDirectory ? retainedFile(rawPath) : undefined)
-        .catch(() => undefined) : undefined,
+      (recording ? stopCapture().catch(() => {}) : Promise.resolve())
+        .then(() => capture?.stop())
+        .then(() => clock !== undefined && config.runDirectory ? retainedFile(rawPath) : undefined)
+        .catch(() => undefined),
       config.runDirectory && page && !signal.aborted ? saveFailureScreenshot(page, directory, signal) : undefined,
     ])
-    if (signal.aborted) throw error
-    throw await addDiagnostics(error, { flow: config.flow, recordingTime, capturePath, screenshotPath })
+    if (callerSignal?.aborted) throw callerSignal.reason
+    throw await addDiagnostics(failure, { flow: config.flow, recordingTime, capturePath, screenshotPath })
   } finally {
+    await capture?.stop().catch(() => {})
     // A shutdown error must not hide the flow failure.
     if (browser) {
       if (failed) await browser.close().catch(() => {})
@@ -100,7 +118,7 @@ async function assertPageGeometry(page, config, signal) {
 }
 
 function assertFrameSize(frame, config) {
-  // Playwright may pad the saved WebM. Check the actual JPEG, not DPR or the container size.
+  // Check the exported JPEG dimensions; deviceScaleFactor alone is insufficient.
   const size = jpegSize(frame.data)
   if (size?.width !== config.video.width || size?.height !== config.video.height ||
       frame.viewportWidth !== config.viewport.width || frame.viewportHeight !== config.viewport.height) {
@@ -150,7 +168,7 @@ async function launchBrowser(config, { handleSignals }) {
     if (!/Executable doesn't exist/i.test(error.message)) throw error
     const message = config.browser
       ? `Configured browser executable is unavailable: ${config.browser}`
-      : 'Playwright Chromium is not installed. Run `npx playwright@1.64.1 install --only-shell chromium`, or pass --browser to a Chrome executable and run `npx playwright@1.64.1 install ffmpeg`.'
+      : 'Playwright Chromium is not installed. Run `npx playwright@1.64.1 install --only-shell chromium`, or pass --browser to a Chrome executable.'
     throw new TraceframeError(message, { code: 'PLAYWRIGHT_RUNTIME_MISSING', cause: error })
   }
 }
@@ -164,17 +182,6 @@ async function waitForReady(page, flow, config, signal) {
     page.setDefaultTimeout(PLAYWRIGHT_DEFAULT_TIMEOUT)
   } catch (error) {
     throw new TraceframeError(`Ready check failed: ${error instanceof Error ? error.message : error}`, { code: 'READY_FAILED', cause: error })
-  }
-}
-
-async function startScreencast(page, path, config, onFrame) {
-  try {
-    await page.screencast.start({ path, size: { width: config.video.width, height: config.video.height }, fps: config.video.fps, quality: 95, onFrame })
-  } catch (error) {
-    if (!/Executable doesn't exist/i.test(error.message)) throw error
-    // Playwright added our frame client before looking for FFmpeg; no caller recorder was active.
-    await page.screencast.stop().catch(() => {})
-    throw new TraceframeError("Playwright's FFmpeg is not installed. It is needed to record, even with --browser. Run `npx playwright@1.64.1 install ffmpeg`.", { code: 'PLAYWRIGHT_RUNTIME_MISSING', cause: error })
   }
 }
 

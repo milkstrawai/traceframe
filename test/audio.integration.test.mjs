@@ -157,7 +157,7 @@ test('static audio errors reject before a caller-page flow and preserve the prev
       for (const input of [join(directory, 'missing.wav'), directory, rawPath]) {
         await assert.rejects(recordPage({ page, output, audio: { path: input }, flow: () => { called = true } }), { code: 'AUDIO_INVALID' })
       }
-      for (const name of ['capture.webm', 'render.filter', 'failure.png']) {
+      for (const name of ['capture.mkv', 'capture.webm', 'render.filter', 'failure.png']) {
         const input = join(directory, name)
         await copyFile(path, input)
         await assert.rejects(recordPage({ page, output, runDirectory: directory, audio: { path: input }, flow: () => { called = true } }), { code: 'INVALID_CONFIG' })
@@ -291,11 +291,11 @@ test('audio outside the video and a failed audio supplier preserve output and re
       const runDirectory = join(directory, `run-${index}`)
       await assert.rejects(record({ url: 'data:text/html,<p>Demo</p>', flow, output, preset: 'draft', viewportWidth: 320, viewportHeight: 240, postRoll: 0, runDirectory, audio }), (error) => {
         for (const [key, value] of Object.entries(expected)) assert.equal(error[key], value)
-        assert.equal(error.diagnostics.capturePath, join(runDirectory, 'capture.webm'))
+        assert.equal(error.diagnostics.capturePath, join(runDirectory, 'capture.mkv'))
         return true
       })
       assert.equal(await readFile(output, 'utf8'), 'previous output')
-      assert.ok((await readdir(runDirectory)).includes('capture.webm'))
+      assert.ok((await readdir(runDirectory)).includes('capture.mkv'))
     }
   })
 })

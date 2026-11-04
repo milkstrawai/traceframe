@@ -20,6 +20,8 @@ const OPTION_KEYS = {
   'viewport-height': 'viewportHeight',
   scale: 'scale',
   fps: 'fps',
+  'capture-quality': 'captureQuality',
+  'capture-diagnostics': 'captureDiagnostics',
   'post-roll': 'postRoll',
   'ready-timeout': 'readyTimeout',
   'flow-timeout': 'flowTimeout',
@@ -27,7 +29,7 @@ const OPTION_KEYS = {
   audio: 'audio',
   'audio-offset': 'audioOffset',
 }
-const NUMBER_KEYS = new Set(['viewportWidth', 'viewportHeight', 'scale', 'fps', 'postRoll', 'readyTimeout', 'flowTimeout', 'audioOffset'])
+const NUMBER_KEYS = new Set(['viewportWidth', 'viewportHeight', 'scale', 'fps', 'captureQuality', 'postRoll', 'readyTimeout', 'flowTimeout', 'audioOffset'])
 const HELP = `traceframe ${VERSION}
 
 Record a scripted Chromium flow and render a smooth cursor and click pulse.
@@ -44,6 +46,8 @@ Options:
   --viewport-height <pixels>   CSS viewport height
   --scale <1|2>                Device scale factor; the video is the viewport times this
   --fps <30|60>                Encoded frame rate
+  --capture-quality <1–100>    JPEG frame quality (default: 95); lower can reduce capture cost
+  --capture-diagnostics        Include frame delivery cadence and gaps in the JSON summary
   --post-roll <seconds>        Tail after the flow (default: 0.3)
   --ready-timeout <seconds>    Playwright default timeout during navigation and ready() (default: 30)
   --flow-timeout <seconds>     Time limit for the flow, including waits (default: 120)
@@ -99,7 +103,7 @@ function parseCommand(args) {
     options: {
       help: { type: 'boolean', short: 'h' },
       version: { type: 'boolean', short: 'v' },
-      ...Object.fromEntries(Object.keys(OPTION_KEYS).map((name) => [name, { type: 'string' }])),
+      ...Object.fromEntries(Object.keys(OPTION_KEYS).map((name) => [name, { type: name === 'capture-diagnostics' ? 'boolean' : 'string' }])),
     },
   })
   if (values.help || args.length === 0) return { help: true }

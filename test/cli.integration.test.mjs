@@ -11,7 +11,7 @@ const cli = fileURLToPath(new URL('../src/cli.mjs', import.meta.url))
 const exec = promisify(execFile)
 
 async function withFixture(source, check) {
-  const directory = await mkdtemp(join(tmpdir(), 'traceframe-cli-'))
+  const directory = await mkdtemp(join(tmpdir(), 'traceframe CLI ü-'))
   try {
     const flow = join(directory, 'flow.mjs')
     const page = join(directory, 'page.html')
@@ -46,7 +46,7 @@ test('CLI reports the locator error, flow location, recording time and actual sa
     assert.match(result.stderr, /Call log:[\s\S]*getByRole\('status'/)
     assert.ok(result.stderr.includes(`  Flow: ${flow}:2:`))
     assert.match(result.stderr, /  Recording time: \d+\.\d{2} s\n/)
-    for (const [label, filename] of [['Capture', 'capture.webm'], ['Screenshot', 'failure.png']]) {
+    for (const [label, filename] of [['Capture', 'capture.mkv'], ['Screenshot', 'failure.png']]) {
       const path = join(runDirectory, filename)
       assert.ok(result.stderr.includes(`  ${label}: ${path}\n`))
       assert.ok((await stat(path)).size > 0)
@@ -68,7 +68,7 @@ test('CLI still reports flow context without --run-dir and does not claim saved 
   })
 })
 
-test('CLI Ctrl-C keeps exit 130, interruption messages and partial capture without a failure screenshot', { timeout: 30_000 }, async () => {
+test('CLI Ctrl-C keeps exit 130, interruption messages and partial capture without a failure screenshot', { timeout: 30_000, skip: process.platform === 'win32' }, async () => {
   const source = `export default async ({ wait }) => {
   await wait(0.2)
   process.kill(process.pid, 'SIGINT')
@@ -81,8 +81,8 @@ test('CLI Ctrl-C keeps exit 130, interruption messages and partial capture witho
     assert.match(result.stderr, /Stopping and cleaning up/)
     assert.match(result.stderr, /Recording was interrupted/)
     assert.doesNotMatch(result.stderr, /FLOW_FAILED|Recording time:|Screenshot:/)
-    assert.deepEqual(await readdir(runDirectory), ['capture.webm'])
-    await exec('ffmpeg', ['-v', 'error', '-xerror', '-i', join(runDirectory, 'capture.webm'), '-f', 'null', '-'])
+    assert.deepEqual(await readdir(runDirectory), ['capture.mkv'])
+    await exec('ffmpeg', ['-v', 'error', '-xerror', '-i', join(runDirectory, 'capture.mkv'), '-f', 'null', '-'])
   })
 })
 

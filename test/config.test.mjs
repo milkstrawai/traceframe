@@ -44,6 +44,19 @@ test('accepts numbers only', () => {
   assert.throws(() => createConfig({ ...base, flowTimeout: '300' }), /Flow timeout must be more than 0 seconds/)
 })
 
+test('capture quality and diagnostics are explicit settings for both recording APIs', () => {
+  for (const configure of [(options) => createConfig({ ...base, ...options }), (options) => createPageConfig({ page, ...options })]) {
+    assert.equal(configure({}).captureQuality, 95)
+    assert.equal(configure({}).captureDiagnostics, false)
+    assert.equal(configure({ captureQuality: 80, captureDiagnostics: true }).captureQuality, 80)
+    assert.equal(configure({ captureDiagnostics: true }).captureDiagnostics, true)
+    for (const captureQuality of [0, 101, 80.5, '80', NaN]) {
+      assert.throws(() => configure({ captureQuality }), { code: 'INVALID_CONFIG' })
+    }
+    assert.throws(() => configure({ captureDiagnostics: 'true' }), { code: 'INVALID_CONFIG' })
+  }
+})
+
 const page = { viewportSize: () => ({ width: 640, height: 480 }), screencast: {}, isClosed: () => false }
 
 test('existing-page settings use the caller viewport with explicit scale and fps', () => {
@@ -73,7 +86,7 @@ test('both recording paths normalize external audio with an explicit offset', ()
       assert.throws(() => configure({ audio: invalid }), { code: 'INVALID_CONFIG' })
     }
     assert.throws(() => configure({ output: 'same.mp4', audio: { path: 'same.mp4' } }), /different paths/)
-    for (const name of ['capture.webm', 'render.filter', 'failure.png']) {
+    for (const name of ['capture.mkv', 'capture.webm', 'render.filter', 'failure.png']) {
       assert.throws(() => configure({ runDirectory: 'take', audio: { path: `take/${name}` } }), /reserved recording file/)
     }
   }

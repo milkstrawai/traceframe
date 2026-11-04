@@ -54,6 +54,9 @@ function recordingConfig(options, viewport, defaults) {
     fps: options.fps ?? defaults.fps,
   }
   check(video.fps === 30 || video.fps === 60, 'FPS must be 30 or 60.')
+  const captureQuality = options.captureQuality ?? 95
+  check(Number.isInteger(captureQuality) && captureQuality >= 1 && captureQuality <= 100, 'Capture quality must be an integer from 1 to 100.')
+  check(options.captureDiagnostics === undefined || typeof options.captureDiagnostics === 'boolean', 'Capture diagnostics must be a boolean.')
   check(video.width % 2 === 0 && video.height % 2 === 0, 'At scale 1, the viewport width and height must be even.')
 
   const output = resolve(options.output ?? 'traceframe.mp4')
@@ -69,6 +72,8 @@ function recordingConfig(options, viewport, defaults) {
     audio: typeof options.audio === 'function' ? options.audio : createAudioConfig(options.audio, output, runDirectory),
     viewport: { ...viewport },
     video,
+    captureQuality,
+    captureDiagnostics: options.captureDiagnostics ?? false,
     scale,
     postRoll,
     flowTimeout,
@@ -82,7 +87,7 @@ export function createAudioConfig(audio, output, directory) {
   const path = resolve(audio.path)
   check(path !== output, 'Audio input and video output must use different paths.')
   if (directory) {
-    check(!['capture.webm', 'render.filter', 'failure.png'].some((name) => path === resolve(directory, name)), `Audio input must not use a reserved recording file: ${path}`)
+    check(!['capture.mkv', 'capture.webm', 'render.filter', 'failure.png'].some((name) => path === resolve(directory, name)), `Audio input must not use a reserved recording file: ${path}`)
   }
   const offset = audio.offset ?? 0
   check(Number.isFinite(offset), 'Audio offset must be a finite number of seconds.')

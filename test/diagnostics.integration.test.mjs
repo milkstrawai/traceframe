@@ -35,7 +35,7 @@ async function failure(options) {
 }
 
 async function checkArtifacts(error, options) {
-  assert.equal(error.diagnostics.capturePath, join(options.runDirectory, 'capture.webm'))
+  assert.equal(error.diagnostics.capturePath, join(options.runDirectory, 'capture.mkv'))
   assert.equal(error.diagnostics.screenshotPath, join(options.runDirectory, 'failure.png'))
   const png = await readFile(error.diagnostics.screenshotPath)
   assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a')
@@ -63,7 +63,7 @@ export default async ({ page, wait }) => {
     assert.ok(error.diagnostics.flowLocations.some(({ line }) => line === 6))
     await checkArtifacts(error, options)
     const { stdout } = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', error.diagnostics.capturePath])
-    // Playwright pads the raw WebM with a repeated final frame; its duration is not the failure time.
+    // The capture includes a final held frame; its duration is not the failure time.
     assert.ok(Number(stdout) >= error.diagnostics.recordingTime, `raw duration=${stdout.trim()}, failure time=${error.diagnostics.recordingTime}`)
   })
 })
@@ -127,7 +127,7 @@ export default () => { throw problem }`
 test('ready failures have a screenshot and flow location but no recording time or stale capture path', { timeout: 30_000 }, async () => {
   await withFixture("export function ready() { throw new Error('not ready') }\nexport default () => {}", async ({ options }) => {
     await mkdir(options.runDirectory)
-    await writeFile(join(options.runDirectory, 'capture.webm'), 'old capture')
+    await writeFile(join(options.runDirectory, 'capture.mkv'), 'old capture')
     const error = await failure(options)
     assert.equal(error.code, 'READY_FAILED')
     assert.equal(error.cause.message, 'not ready')
@@ -140,16 +140,17 @@ test('ready failures have a screenshot and flow location but no recording time o
 
 test('a browser setup failure does not claim recording artifacts', { timeout: 30_000 }, async () => {
   await withFixture('export default () => {}', async ({ options, directory }) => {
-    const previousTemp = process.env.TMPDIR
-    process.env.TMPDIR = directory
+    const tempKey = process.platform === 'win32' ? 'TEMP' : 'TMPDIR'
+    const previousTemp = process.env[tempKey]
+    process.env[tempKey] = directory
     try {
       const error = await failure({ ...options, browser: join(directory, 'missing-browser') })
       assert.equal(error.code, 'PLAYWRIGHT_RUNTIME_MISSING')
       assert.equal(error.diagnostics, undefined)
       assert.deepEqual(await readdir(options.runDirectory), [])
     } finally {
-      if (previousTemp === undefined) delete process.env.TMPDIR
-      else process.env.TMPDIR = previousTemp
+      if (previousTemp === undefined) delete process.env[tempKey]
+      else process.env[tempKey] = previousTemp
     }
   })
 })
@@ -160,13 +161,38 @@ export function ready({ page }) { page.screencast.start = async () => { throw pr
 export default () => {}`
   await withFixture(source, async ({ options, module }) => {
     await mkdir(options.runDirectory)
-    await writeFile(join(options.runDirectory, 'capture.webm'), 'old capture')
+    await writeFile(join(options.runDirectory, 'capture.mkv'), 'old capture')
     const error = await failure(options)
     assert.equal(error, module.problem)
     assert.equal(error.code, undefined)
     assert.equal(error.diagnostics.recordingTime, undefined)
     assert.equal(error.diagnostics.capturePath, undefined)
     assert.equal(error.diagnostics.screenshotPath, join(options.runDirectory, 'failure.png'))
+  })
+})
+
+test('a launched browser with undersized frames fails before the flow and closes cleanly', { timeout: 30_000 }, async () => {
+  const source = `export let browser, stops = 0, ran = false
+export function ready({ page }) {
+  browser = page.context().browser()
+  const start = page.screencast.start.bind(page.screencast)
+  page.screencast.start = options => start({ ...options, size: { width: 320, height: 240 } })
+  const stop = page.screencast.stop.bind(page.screencast)
+  page.screencast.stop = async () => { stops++; await stop() }
+}
+export default () => { ran = true }`
+  await withFixture(source, async ({ options, module }) => {
+    await writeFile(options.output, 'previous output')
+    const error = await failure(options)
+    assert.equal(error.code, 'CAPTURE_SIZE_MISMATCH')
+    assert.match(error.message, /320×240 for a 640×480 viewport; expected 640×480 for a 640×480 viewport/)
+    assert.equal(module.ran, false)
+    assert.equal(module.stops, 1)
+    assert.equal(module.browser.isConnected(), false)
+    assert.equal(error.diagnostics.capturePath, join(options.runDirectory, 'capture.mkv'))
+    assert.ok((await fs.stat(error.diagnostics.capturePath)).size > 0)
+    assert.equal(error.diagnostics.screenshotPath, join(options.runDirectory, 'failure.png'))
+    assert.equal(await readFile(options.output, 'utf8'), 'previous output')
   })
 })
 
@@ -190,7 +216,9 @@ export default () => { throw new Error('the flow must not run') }`
     const error = await failure(options)
     assert.equal(error.code, 'FIRST_FRAME_TIMEOUT')
     assert.equal(error.diagnostics.recordingTime, undefined)
-    await checkArtifacts(error, options)
+    assert.equal(error.diagnostics.capturePath, undefined)
+    assert.equal(error.diagnostics.screenshotPath, join(options.runDirectory, 'failure.png'))
+    await assert.rejects(fs.stat(join(options.runDirectory, 'capture.mkv')), { code: 'ENOENT' })
   })
 })
 
@@ -205,7 +233,7 @@ for (const screenshot of ["async () => { throw new Error('screenshot failed') }"
       assert.equal(error.code, 'FLOW_FAILED')
       assert.equal(error.message, 'original flow failure')
       assert.equal(error.diagnostics.screenshotPath, undefined)
-      assert.equal(error.diagnostics.capturePath, join(options.runDirectory, 'capture.webm'))
+      assert.equal(error.diagnostics.capturePath, join(options.runDirectory, 'capture.mkv'))
     })
   })
 }
@@ -216,7 +244,7 @@ test('a screenshot write failure does not replace the original error or claim a 
     const error = await failure(options)
     assert.equal(error.message, 'flow failure')
     assert.equal(error.diagnostics.screenshotPath, undefined)
-    assert.equal(error.diagnostics.capturePath, join(options.runDirectory, 'capture.webm'))
+    assert.equal(error.diagnostics.capturePath, join(options.runDirectory, 'capture.mkv'))
   })
 })
 
@@ -231,7 +259,7 @@ test('a slow screencast save keeps the current capture instead of abandoning it 
 export default () => { throw new Error('original failure') }`
   await withFixture(source, async ({ options }) => {
     await mkdir(options.runDirectory)
-    await writeFile(join(options.runDirectory, 'capture.webm'), 'old capture')
+    await writeFile(join(options.runDirectory, 'capture.mkv'), 'old capture')
     const error = await failure(options)
     assert.equal(error.code, 'FLOW_FAILED')
     assert.equal(error.message, 'original failure')
@@ -250,7 +278,7 @@ export default async ({ wait }) => { await wait(0.1) }`
     const error = await failure(options)
     assert.equal(error, module.problem)
     assert.equal(module.stops, 1)
-    assert.equal(error.diagnostics.capturePath, undefined)
+    assert.equal(error.diagnostics.capturePath, join(options.runDirectory, 'capture.mkv'))
     assert.equal(error.diagnostics.screenshotPath, join(options.runDirectory, 'failure.png'))
   })
 })
@@ -267,7 +295,7 @@ test('a closed page and a browser-close error do not replace the flow failure', 
     const error = await failure(options)
     assert.equal(error.code, 'FLOW_FAILED')
     assert.equal(error.message, 'flow failure')
-    assert.equal(error.diagnostics.capturePath, undefined)
+    assert.equal(error.diagnostics.capturePath, join(options.runDirectory, 'capture.mkv'))
     assert.equal(error.diagnostics.screenshotPath, undefined)
   })
 })
@@ -281,8 +309,9 @@ export default ({ page }) => {
   await withFixture(source, async ({ options, directory, module }) => {
     const temp = join(directory, 'temp')
     await mkdir(temp)
-    const previousTemp = process.env.TMPDIR
-    process.env.TMPDIR = temp
+    const tempKey = process.platform === 'win32' ? 'TEMP' : 'TMPDIR'
+    const previousTemp = process.env[tempKey]
+    process.env[tempKey] = temp
     try {
       const error = await failure({ ...options, runDirectory: undefined })
       assert.equal(error.code, 'FLOW_FAILED')
@@ -293,8 +322,8 @@ export default ({ page }) => {
       assert.equal(module.screenshots, 0)
       assert.deepEqual(await readdir(temp), [])
     } finally {
-      if (previousTemp === undefined) delete process.env.TMPDIR
-      else process.env.TMPDIR = previousTemp
+      if (previousTemp === undefined) delete process.env[tempKey]
+      else process.env[tempKey] = previousTemp
     }
   })
 })
@@ -314,7 +343,7 @@ export default async ({ page, wait }) => {
     assert.equal(error, module.reason)
     assert.equal(error.diagnostics, undefined)
     assert.equal(module.screenshots, 0)
-    await run('ffmpeg', ['-v', 'error', '-xerror', '-i', join(options.runDirectory, 'capture.webm'), '-f', 'null', '-'])
+    await run('ffmpeg', ['-v', 'error', '-xerror', '-i', join(options.runDirectory, 'capture.mkv'), '-f', 'null', '-'])
   })
 })
 
@@ -342,7 +371,7 @@ test('a render failure reports the retained capture without being classified as 
     await mkdir(options.output)
     const error = await failure(options)
     assert.notEqual(error.code, 'FLOW_FAILED')
-    assert.equal(error.diagnostics.capturePath, join(options.runDirectory, 'capture.webm'))
+    assert.equal(error.diagnostics.capturePath, join(options.runDirectory, 'capture.mkv'))
     assert.equal(error.diagnostics.recordingTime, undefined)
     assert.equal(error.diagnostics.screenshotPath, undefined)
     assert.deepEqual(error.diagnostics.flowLocations, [])
@@ -358,7 +387,7 @@ test('cancellation during render-failure diagnostics keeps the exact signal reas
     // Cancel while collecting metadata after the final output rename fails.
     const diagnosticStat = t.mock.method(fs, 'stat', async (path, ...args) => {
       const result = await stat(path, ...args)
-      if (path === join(options.runDirectory, 'capture.webm')) controller.abort(reason)
+      if (path === join(options.runDirectory, 'capture.mkv')) controller.abort(reason)
       return result
     })
     syncBuiltinESMExports()

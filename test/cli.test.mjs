@@ -42,3 +42,8 @@ test('parses audio settings and explains incomplete or invalid offsets', async (
   assert.match((await run('record', ...flowArgs, '--audio-offset', '1')).stderr, /Audio must specify a local file path/)
   assert.match((await run('record', ...flowArgs, '--audio', 'sound.wav', '--audio-offset', 'never')).stderr, /Audio offset must be a finite number/)
 })
+
+test('parses capture quality as a number and capture diagnostics as a flag', async () => {
+  assert.match((await run('record', ...flowArgs, '--capture-quality', '101')).stderr, /Capture quality must be an integer/)
+  assert.match((await run('record', '--url', 'file:///tmp/page.html', '--flow', 'missing-flow.mjs', '--capture-quality', '80', '--capture-diagnostics')).stderr, /Could not load flow/)
+})

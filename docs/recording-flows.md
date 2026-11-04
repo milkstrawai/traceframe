@@ -160,7 +160,7 @@ The two `Emulation` calls set the locale that `navigator.language`, `Intl`, and 
 
 Use `--preset draft` while writing the flow and the default preset for the final video.
 
-While writing the flow, pass `--run-dir` with an ignored folder, such as `.traceframe/runs/demo`. Use a separate directory for each take. A failed take keeps its partial `capture.webm` when saving succeeds and attempts a viewport screenshot, `failure.png`. The raw capture has no added cursor overlay and may include repeated final frames after the failure time.
+While writing the flow, pass `--run-dir` with an ignored folder, such as `.traceframe/runs/demo`. Use a separate directory for each take. A failed take keeps its partial `capture.mkv` when available and attempts a viewport screenshot, `failure.png`. An interrupted capture may be incomplete. The raw capture has no added cursor overlay and may include repeated final frames after the failure time.
 
 A failed take may already have submitted real jobs, so reset demo data before recording again. Check the finished file for decode errors:
 
@@ -200,7 +200,7 @@ The CLI keeps the original error message and adds available context on standard 
 traceframe: [FLOW_FAILED] Expected the Saved status.
   Flow: /project/review.mjs:18:9
   Recording time: 12.35 s
-  Capture: /project/.traceframe/runs/demo/capture.webm
+  Capture: /project/.traceframe/runs/demo/capture.mkv
   Screenshot: /project/.traceframe/runs/demo/failure.png
 ```
 

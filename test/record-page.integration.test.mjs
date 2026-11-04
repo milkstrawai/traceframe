@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -71,6 +71,29 @@ test('records from a persistent context and leaves it usable', { timeout: 30_000
     const next = await context.newPage()
     await next.close()
   }, { persistent: true })
+})
+
+test('capture quality reaches Chromium and diagnostics describe delivered frames', { timeout: 30_000 }, async () => {
+  await withPage(async ({ page, options }) => {
+    const start = page.screencast.start.bind(page.screencast)
+    const frames = []
+    page.screencast.start = (settings) => {
+      assert.equal(settings.quality, 80)
+      return start({ ...settings, onFrame(frame) {
+        frames.push(frame.timestamp)
+        return settings.onFrame(frame)
+      } })
+    }
+    const result = await recordPage({ ...options, captureQuality: 80, captureDiagnostics: true, flow: async ({ click, wait }) => {
+      await click(page.getByRole('button'), { duration: 0.05, dwell: 0 })
+      await wait(0.2)
+    } })
+    assert.ok(frames.length > 1)
+    assert.equal(result.captureStats.framesReceived, frames.length)
+    assert.equal(result.captureStats.sourceSpanSeconds, (Math.max(...frames) - Math.min(...frames)) / 1000)
+    assert.ok(result.captureStats.receivedFps > 0)
+    await checkVideo(result.output, viewport.width, viewport.height)
+  })
 })
 
 test('DPR alone cannot silently create a padded, misaligned scale-2 recording', { timeout: 30_000 }, async () => {
@@ -243,12 +266,12 @@ test('callback failures retain diagnostic artifacts without a flow filename and 
       assert.equal(error.cause, problem)
       assert.deepEqual(error.diagnostics.flowLocations, [])
       assert.ok(Number.isFinite(error.diagnostics.recordingTime))
-      assert.equal(error.diagnostics.capturePath, join(runDirectory, 'capture.webm'))
+      assert.equal(error.diagnostics.capturePath, join(runDirectory, 'capture.mkv'))
       assert.equal(error.diagnostics.screenshotPath, join(runDirectory, 'failure.png'))
       return true
     })
     assert.ok((await readFile(join(runDirectory, 'failure.png'))).length > 0)
-    await checkVideo(join(runDirectory, 'capture.webm'), viewport.width, viewport.height)
+    await checkVideo(join(runDirectory, 'capture.mkv'), viewport.width, viewport.height)
     assert.equal(page.isClosed(), false)
     await recordPage({ ...options, flow: async ({ wait }) => wait(0.1) })
   })
@@ -305,37 +328,29 @@ test('an existing caller screencast survives a rejected recording attempt', { ti
   })
 })
 
-test('missing FFmpeg after a partial start leaves the page reusable', { timeout: 30_000 }, async () => {
-  await withPage(async ({ page, options }) => {
-    const problem = new Error("Executable doesn't exist at synthetic-ffmpeg")
-    const start = page.screencast.start.bind(page.screencast)
-    page.screencast.start = async (settings) => {
-      page.screencast.start = start
-      // A real frame client starts, but no video artifact exists when the FFmpeg lookup fails.
-      await start({ ...settings, path: undefined })
-      throw problem
-    }
-    let called = false
-    await assert.rejects(recordPage({ ...options, flow: () => { called = true } }), error => {
-      assert.equal(error.code, 'PLAYWRIGHT_RUNTIME_MISSING')
-      assert.equal(error.cause, problem)
-      return true
-    })
-    assert.equal(called, false)
-    assert.equal(page.isClosed(), false)
-    await recordPage({ ...options, flow: async ({ wait }) => wait(0.1) })
-  })
-})
-
-test('page closure during a take fails without claiming a saved capture', { timeout: 30_000 }, async () => {
+test('page closure during a take reports the independently saved partial capture', { timeout: 30_000 }, async () => {
   await withPage(async ({ page, context, directory, options }) => {
     const runDirectory = join(directory, 'run')
     await assert.rejects(recordPage({ ...options, runDirectory, flow: () => page.close() }), error => {
-      assert.equal(error.diagnostics?.capturePath, undefined)
+      assert.equal(error.diagnostics?.capturePath, join(runDirectory, 'capture.mkv'))
       return true
     })
-    assert.deepEqual(await readdir(runDirectory), [])
+    assert.deepEqual(await readdir(runDirectory), ['capture.mkv'])
+    await checkVideo(join(runDirectory, 'capture.mkv'), viewport.width, viewport.height)
     const other = await context.newPage()
     await other.close()
+  })
+})
+
+test('a capture write failure rejects promptly, preserves the old output and releases the caller page', { timeout: 30_000 }, async () => {
+  await withPage(async ({ page, directory, options }) => {
+    const runDirectory = join(directory, 'run')
+    await mkdir(join(runDirectory, 'capture.mkv'), { recursive: true })
+    await writeFile(options.output, 'previous output')
+    await assert.rejects(recordPage({ ...options, runDirectory, flow: ({ wait }) => wait(60) }), { code: 'CAPTURE_FAILED' })
+    assert.equal(await readFile(options.output, 'utf8'), 'previous output')
+    assert.equal(page.isClosed(), false)
+    await recordPage({ ...options, flow: ({ wait }) => wait(0.1) })
+    await checkVideo(options.output, viewport.width, viewport.height)
   })
 })
