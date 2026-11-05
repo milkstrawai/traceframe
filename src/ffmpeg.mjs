@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { addAbortListener } from 'node:events'
 import { stat } from 'node:fs/promises'
 import { promisify } from 'node:util'
 
@@ -45,8 +46,19 @@ export async function probeVideoDuration(path, signal) {
 }
 
 export async function runCommand(command, args, options = {}) {
-  const run = execFileAsync(command, args, options)
+  const windowsSignal = process.platform === 'win32' ? options.signal : undefined
+  windowsSignal?.throwIfAborted()
+  const run = execFileAsync(command, args, windowsSignal ? { ...options, signal: undefined } : options)
   const closed = new Promise((resolve) => run.child.once('close', resolve))
+  let termination
+  const abort = windowsSignal && addAbortListener(windowsSignal, () => {
+    // Chocolatey shims launch the real encoder as a child. Stop both before
+    // removing files, which Windows keeps locked while the encoder is alive.
+    if (run.child.pid && run.child.exitCode === null && run.child.signalCode === null) {
+      termination = execFileAsync('taskkill', ['/pid', String(run.child.pid), '/t', '/f'])
+        .catch(() => run.child.kill())
+    }
+  })
   try {
     return await run
   } catch (error) {
@@ -58,6 +70,9 @@ export async function runCommand(command, args, options = {}) {
     const rawDetail = error.stderr?.trim() || error.stdout?.trim() || error.message
     const detail = rawDetail.length > 2_000 ? `${rawDetail.slice(0, 1_900)}\n… output truncated` : rawDetail
     throw new TraceframeError(`${command} failed: ${detail}`, { code: 'COMMAND_FAILED', cause: error })
+  } finally {
+    abort?.[Symbol.dispose]()
+    await termination
   }
 }
 

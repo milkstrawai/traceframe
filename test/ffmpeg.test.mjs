@@ -1,8 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 
 import { filterComplexFileOption, parseFfmpegMajor, probeAudio, runCommand } from '../src/ffmpeg.mjs'
 
@@ -60,4 +61,28 @@ test('waits for an aborted command to exit before rejecting', { skip: process.pl
   const started = performance.now()
   await assert.rejects(running)
   assert.ok(performance.now() - started >= 400)
+})
+
+test('Windows cancellation stops a launcher and its child before rejecting', { skip: process.platform !== 'win32', timeout: 15_000 }, async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'traceframe-command-'))
+  const pidFile = join(directory, 'child.pid')
+  const controller = new AbortController()
+  const worker = "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)"
+  const launcher = `require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(worker)}, process.argv[1]], { stdio: 'ignore' }); setInterval(() => {}, 1000)`
+  const rejected = assert.rejects(runCommand(process.execPath, ['-e', launcher, pidFile], { signal: controller.signal }), { code: 'COMMAND_FAILED' })
+  let childPid
+  try {
+    while (!childPid) {
+      childPid = Number(await readFile(pidFile, 'utf8').catch(() => ''))
+      if (!childPid) await delay(20, undefined, { signal: t.signal })
+    }
+    controller.abort()
+    await rejected
+    assert.throws(() => process.kill(childPid, 0), { code: 'ESRCH' })
+  } finally {
+    controller.abort()
+    await rejected.catch(() => {})
+    if (childPid) { try { process.kill(childPid, 'SIGKILL') } catch {} }
+    await rm(directory, { recursive: true, force: true })
+  }
 })
