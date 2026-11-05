@@ -362,7 +362,8 @@ test('padded audio cannot hide a truncated video or replace the previous output'
       rawPath, directory,
       trace: { initialPointer: { x: 10, y: 20 }, moves: [], clicks: [], end: 3 },
       config: { video: { ...viewport, fps: 30 }, scale: 1, postRoll: 0, output },
-      ffmpeg: await probeFfmpeg({ audio: true }),
+      // Force early video EOF; FFmpeg 7's repeat mode can extend the video.
+      ffmpeg: { ...await probeFfmpeg({ audio: true }), overlayEofAction: 'endall' },
       audio: { path, offset: 0 },
     }), { code: 'OUTPUT_MISMATCH' })
     assert.equal(await readFile(output, 'utf8'), 'previous output')

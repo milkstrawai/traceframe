@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -42,7 +42,7 @@ test('matches canonical stack paths when the flow was loaded through a symlink',
       throw error
     }
     const error = new Error('failed')
-    error.stack = `Error: failed\n    at default (${pathToFileURL(path).href}:4:5)`
+    error.stack = `Error: failed\n    at default (${pathToFileURL(await realpath(path)).href}:4:5)`
     await addDiagnostics(error, { flow: alias })
     assert.deepEqual(error.diagnostics.flowLocations, [{ file: alias, line: 4, column: 5 }])
   } finally {
