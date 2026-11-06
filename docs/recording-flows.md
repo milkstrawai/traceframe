@@ -24,6 +24,16 @@ Put setup and page readiness in `ready({ page, signal })`. This runs after initi
 
 If your script already owns the page or an extension context, use [`recordPage`](../README.md#record-a-page-you-already-opened) with an inline callback. Prepare the page before calling it; the caller owns navigation and browser cleanup.
 
+### Check video playback
+
+For a video-heavy journey, check playback in your first take at the final recording settings; a separate check before recording is not needed. Record that take with `--capture-diagnostics` (`captureDiagnostics: true` in the API) and [inspect the saved motion](#record-inspect-and-refine) of its video segment. Capture diagnostics count delivered frames, which can contain repeated pictures; a final MP4 reporting 60 FPS does not establish 60 distinct captured images per second, and a 30 FPS source cannot provide 60 distinct video frames per second. If the video looks smooth, later takes need no new playback check until the browser, recording settings or workload changes.
+
+On YouTube, the player's **Settings (gear) → Ambient mode → Off** can reduce expensive background drawing during CPU-only playback. Ambient mode is available only with YouTube's dark theme; check the setting under the theme you will record. Disable this decorative effect only when it is unnecessary for the demonstration, and verify the setting before the take. Use the site's setting in `ready`, or prepare the caller-owned page before `recordPage`; Traceframe does not change it automatically.
+
+For video assets you control, matching the source dimensions to the displayed physical pixels can avoid costly browser resizing during CPU-only playback. Physical dimensions include device scale: a video displayed 1512 CSS pixels wide at scale 2 occupies 3024 physical pixels. Preparing another asset can change image quality, so compare it with the original and preserve the intended framing. Do not silently replace third-party media, crop content or lower the required output resolution to claim a performance improvement.
+
+If the video looks choppy, apply any preparation above that suits the demonstration and make one more take at the same recording settings. If it is still choppy, or nothing applies, keep the requested output dimensions, playback speed and source quality, finish the requested recording and report the limitation. For optional diagnosis of playback without recording, let buffering and any extension processing warm up, then read the video's `getVideoPlaybackQuality()` counters before and after a representative segment with recording off, for example in `ready` or before `recordPage`. Page preparation can improve playback while capture remains expensive.
+
 ## Save and switch login state
 
 Add `.auth/` to your project's `.gitignore`; saved state can grant access to the account. To create it interactively, install full Chromium and open Playwright's login window:

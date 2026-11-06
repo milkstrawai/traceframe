@@ -71,6 +71,8 @@ GPU rendering and hardware video decoding can help the browser, but frame export
 
 Start performance comparisons with the Chromium build bundled with Playwright. A custom `--browser` executable can have different screencast performance even when recording succeeds. Traceframe preserves your requested resolution and quality. If the workload cannot sustain the desired cadence, increasing the encoded FPS repeats existing frames; choose a lower quality or smaller dimensions explicitly if that tradeoff suits your recording.
 
+For video-heavy flows, see [checking video playback](docs/recording-flows.md#check-video-playback), including optional page effects and media sizing.
+
 Use `--run-dir .traceframe/runs/name` (`runDirectory` in the API) to keep the raw capture and FFmpeg filter file, including a partial capture if the flow fails during recording. An interrupted or failed capture can be incomplete; a retained file is not proof that recording finalized successfully. On a preparation or recording failure, Traceframe also tries to save a viewport screenshot as `failure.png`. Keep that directory out of Git, because captures and screenshots can contain private page data.
 
 When available, failure output includes the error code, flow-file locations, elapsed recording time, and paths to artifacts saved for that attempt. Without `--run-dir`, temporary captures are removed and no failure screenshot is saved. See [diagnosing a failed take](docs/recording-flows.md#diagnose-a-failed-take).
