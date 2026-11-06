@@ -57,20 +57,24 @@ export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, s
 // Event times are seconds from the first frame of the raw video.
 export function buildFilterScript({ trace, scale, fps = 60, audio, overlayEofAction = 'pass' }) {
   const { clicks, moves } = trace
+  const animatedOverlays = clicks.length > 0 || moves.length > 0
+  const cadence = `tpad=stop_mode=clone:stop_duration=1,fps=${fps}`
   // Pass mode avoids waiting on looping image inputs; FFmpeg 7 needs repeat for padding.
   // yuv444 places overlays on whole pixels rather than snapping them to even pixels.
   const overlay = `eof_action=${overlayEofAction}:format=yuv444`
-  // Expand sparse capture timestamps before overlays so the cursor stays smooth
-  // even on a static page. Padding also covers a sub-frame take or final rounding.
+  // Animated overlays need every output tick, even on a static page.
+  // With stationary overlays, composite before duplicating identical frames.
+  // Padding also covers a sub-frame take or final rounding.
   // Chrome JPEGs are full range; normalize before compositing limited-range overlays.
   // Convert to the overlay format before duplicating frames. Converting afterward
   // can queue a full-size buffer for every repeated frame in a long static gap.
-  const filters = [`[0:v]scale=out_range=tv,format=yuv420p,format=yuv444p,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=1,fps=${fps}[video0]`]
+  const filters = [`[0:v]scale=out_range=tv,format=yuv420p,format=yuv444p,setpts=PTS-STARTPTS${animatedOverlays ? ',' + cadence : ''}[video0]`]
   if (clicks.length) filters.push(`[2:v]format=rgba,split=${clicks.length}${clicks.map((_, index) => `[pulse${index}]`).join('')}`)
   clicks.forEach((click, index) => filters.push(...clickFilter(click, index, scale, overlay)))
 
   const cursorLabels = moves.map((_, index) => `[cursor${index}]`).join('')
-  filters.push(`[1:v]format=rgba,split=${moves.length + 1}${cursorLabels}[cursor${moves.length}]`)
+  // Convert the cursor once before splitting it into movement segments.
+  filters.push(`[1:v]format=yuva444p,split=${moves.length + 1}${cursorLabels}[cursor${moves.length}]`)
   const coordinate = (value, hotspot) => number(value * scale - hotspot * scale)
   const initialEnable = moves.length ? `:enable='lt(t,${number(moves[0].at)})'` : ''
   filters.push(`[video${clicks.length}][cursor0]overlay=x='${coordinate(trace.initialPointer.x, CURSOR_HOTSPOT.x)}':y='${coordinate(trace.initialPointer.y, CURSOR_HOTSPOT.y)}':${overlay}${initialEnable}[cursorVideo0]`)
@@ -85,7 +89,7 @@ export function buildFilterScript({ trace, scale, fps = 60, audio, overlayEofAct
     const y = `${coordinate(move.from.y, CURSOR_HOTSPOT.y)}+${number((move.to.y - move.from.y) * scale)}*${eased}`
     filters.push(`[cursorVideo${index}][cursor${index + 1}]overlay=x='${x}':y='${y}':${overlay}:enable='${enable}'[cursorVideo${index + 1}]`)
   })
-  filters.push(`[cursorVideo${moves.length}]colorspace=ispace=bt470bg:iprimaries=bt709:itrc=bt709:all=bt709:format=yuv420p[final]`)
+  filters.push(`[cursorVideo${moves.length}]colorspace=ispace=bt470bg:iprimaries=bt709:itrc=bt709:all=bt709:format=yuv420p${animatedOverlays ? '' : ',' + cadence}[final]`)
   if (audio) {
     const input = clicks.length ? 3 : 2
     const trim = number(Math.max(0, -audio.offset))
