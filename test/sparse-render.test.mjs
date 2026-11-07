@@ -47,6 +47,32 @@ test('stationary overlays preserve sparse image changes and post-roll at both sc
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
+test('frames near output-frame boundaries keep their own output frames', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'traceframe-boundary-'))
+  try {
+    const rawPath = join(directory, 'capture.mkv'), output = join(directory, 'output.mp4'), images = []
+    for (const level of ['0x202020', '0x808080', '0xe0e0e0']) {
+      const path = join(directory, `${level}.jpg`)
+      await runCommand('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', `color=c=${level}:s=64x48`, '-frames:v', '1', path])
+      images.push(await readFile(path))
+    }
+    // At 60 FPS these land in output frames 2 and 4. Rounded to 42 and 58 ms, both would land in frame 3.
+    const capture = createJpegCapture(rawPath, { width: 64, height: 48, fps: 60, onError: assert.fail })
+    for (const [index, timestamp] of [1000, 1041.6, 1058.4].entries()) await capture.append({ data: images[index], timestamp })
+    await capture.stop(1100)
+    await renderVideo({ rawPath, directory, ffmpeg: await probeFfmpeg(),
+      trace: { initialPointer: { x: 60, y: 44 }, clicks: [], moves: [], end: 0.08 },
+      config: { video: { width: 64, height: 48, fps: 60 }, scale: 1, postRoll: 0.02, output },
+    })
+    const pixelsPath = join(directory, 'levels.gray')
+    await runCommand('ffmpeg', ['-v', 'error', '-xerror', '-i', output, '-vf', 'crop=8:8:0:0,format=gray', '-f', 'rawvideo', pixelsPath])
+    const pixels = await readFile(pixelsPath), frameBytes = 8 * 8, pictures = []
+    // Gray levels 32, 128 and 224 identify pictures 0, 1 and 2.
+    for (let offset = 0; offset < pixels.length; offset += frameBytes) pictures.push(Math.round(pixels[offset] / 96))
+    assert.deepEqual(pictures, [0, 0, 1, 1, 2, 2])
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
 test('a click without cursor movement still animates between sparse captured frames', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'traceframe-click-only-'))
   try {

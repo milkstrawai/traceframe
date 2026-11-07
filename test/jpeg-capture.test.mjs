@@ -72,13 +72,13 @@ test('disk failures reach the owner and an empty capture does not leave a mislea
   })
 })
 
-test('timestamp ties stay ordered and a startup frame before the origin is dropped', async () => {
+test('timestamp ties stay ordered, sub-millisecond times are kept, and a startup frame before the origin is dropped', async () => {
   await fixture(async ({ data, path }) => {
     const capture = createJpegCapture(path, { width: 32, height: 24, fps: 60, onError: assert.fail })
-    for (const timestamp of [1000, 1000.2, 1000.4, 999, 1020]) await capture.append({ data, timestamp })
+    for (const timestamp of [1000, 1000, 1000.2, 1000.4, 999, 1020]) await capture.append({ data, timestamp })
     await capture.stop(1030)
     const { stdout } = await runCommand('ffprobe', ['-v', 'error', '-show_packets', '-show_entries', 'packet=pts_time', '-of', 'json', path])
-    assert.deepEqual(JSON.parse(stdout).packets.map(packet => Number(packet.pts_time)), [0, 0, 0, 0.02, 0.03])
+    assert.deepEqual(JSON.parse(stdout).packets.map(packet => Number(packet.pts_time)), [0, 0, 0.0002, 0.0004, 0.02, 0.03])
     assert.equal(capture.stats.lateFrames, 1)
     await runCommand('ffmpeg', ['-v', 'error', '-xerror', '-i', path, '-fps_mode', 'passthrough', '-f', 'null', '-'])
   })

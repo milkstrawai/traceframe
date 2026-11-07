@@ -6,6 +6,9 @@ import { finished } from 'node:stream/promises'
 // A short reorder window handles JPEGs that finish compression out of order.
 const REORDER_MS = 150
 const MAX_BUFFER_BYTES = 64 * 1024 * 1024
+// Store microseconds. Millisecond rounding can move distinct pictures into the
+// same output frame when export resamples to a fixed frame rate.
+const TIMESTAMP_SCALE_NS = 1_000
 
 export function createJpegCapture(path, { width, height, fps, onError }) {
   const output = createWriteStream(path)
@@ -25,7 +28,7 @@ export function createJpegCapture(path, { width, height, fps, onError }) {
     try {
       await new Promise((resolve, reject) => {
         output.cork()
-        output.write(cluster(Math.round(frame.timestamp - origin), frame.data.length))
+        output.write(cluster(ticks(frame.timestamp - origin), frame.data.length))
         output.write(frame.data, cause => cause ? reject(cause) : resolve())
         output.uncork()
       })
@@ -70,7 +73,7 @@ export function createJpegCapture(path, { width, height, fps, onError }) {
           await finished(output)
           if (last) {
             const duration = Buffer.from('4489880000000000000000', 'hex')
-            duration.writeDoubleBE(Math.round(last.timestamp - origin) + 1000 / fps, 3)
+            duration.writeDoubleBE(ticks(last.timestamp - origin + 1000 / fps), 3)
             const file = await open(path, 'r+')
             try {
               const { bytesWritten } = await file.write(duration, 0, duration.length, durationOffset)
@@ -94,7 +97,10 @@ export function createJpegCapture(path, { width, height, fps, onError }) {
 }
 
 // The fixed Matroska subset contains one MJPEG track and one keyframe per cluster.
-// Timestamps are milliseconds; JPEG dimensions and pixels remain unchanged.
+// Timestamps are microseconds; JPEG dimensions and pixels remain unchanged.
+function ticks(milliseconds) {
+  return Math.round(milliseconds * 1e6 / TIMESTAMP_SCALE_NS)
+}
 function uint(value) {
   const bytes = []
   do { bytes.unshift(value % 256); value = Math.floor(value / 256) } while (value)
@@ -119,7 +125,7 @@ function header(width, height, fps) {
   ])
   // Reserve a Void element, then replace it with Duration after the last write.
   const durationSlot = Buffer.from('ec89000000000000000000', 'hex')
-  const info = element('1549a966', [element('2ad7b1', 1_000_000), element('4d80', 'traceframe'), element('5741', 'traceframe'), durationSlot])
+  const info = element('1549a966', [element('2ad7b1', TIMESTAMP_SCALE_NS), element('4d80', 'traceframe'), element('5741', 'traceframe'), durationSlot])
   const bytes = Buffer.concat([prefix, info,
     element('1654ae6b', [element('ae', [element('d7', 1), element('73c5', 1), element('83', 1), element('9c', 0), element('86', 'V_MJPEG'), element('23e383', Math.round(1e9 / fps)), element('e0', [element('b0', width), element('ba', height)])])]),
   ])
