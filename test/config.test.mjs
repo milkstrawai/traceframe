@@ -46,7 +46,7 @@ test('accepts numbers only', () => {
 
 test('capture quality and diagnostics are explicit settings for both recording APIs', () => {
   for (const configure of [(options) => createConfig({ ...base, ...options }), (options) => createPageConfig({ page, ...options })]) {
-    assert.equal(configure({}).captureQuality, 95)
+    assert.equal(configure({}).captureQuality, 85)
     assert.equal(configure({}).captureDiagnostics, false)
     assert.equal(configure({ captureQuality: 80, captureDiagnostics: true }).captureQuality, 80)
     assert.equal(configure({ captureDiagnostics: true }).captureDiagnostics, true)

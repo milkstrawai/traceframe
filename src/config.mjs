@@ -54,7 +54,7 @@ function recordingConfig(options, viewport, defaults) {
     fps: options.fps ?? defaults.fps,
   }
   check(video.fps === 30 || video.fps === 60, 'FPS must be 30 or 60.')
-  const captureQuality = options.captureQuality ?? 95
+  const captureQuality = options.captureQuality ?? 85
   check(Number.isInteger(captureQuality) && captureQuality >= 1 && captureQuality <= 100, 'Capture quality must be an integer from 1 to 100.')
   check(options.captureDiagnostics === undefined || typeof options.captureDiagnostics === 'boolean', 'Capture diagnostics must be a boolean.')
   check(video.width % 2 === 0 && video.height % 2 === 0, 'At scale 1, the viewport width and height must be even.')
