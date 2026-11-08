@@ -7,7 +7,7 @@ import { launchBrowser, inspectGraphics } from '../src/browser.mjs'
 
 const hardware = { featureStatus: { gpu_compositing: 'enabled', rasterization: 'enabled' }, auxAttributes: { glRenderer: 'ANGLE (Test GPU)' } }
 const software = { featureStatus: { gpu_compositing: 'disabled_software', rasterization: 'disabled_software' }, auxAttributes: { glRenderer: 'ANGLE (SwiftShader Device)' } }
-const config = { scale: 2, viewport: { width: 320, height: 240 }, storageState: 'test-storage.json', browser: 'test-chromium' }
+const config = { scale: 2, viewport: { width: 320, height: 240 }, video: { width: 640, height: 480 }, storageState: 'test-storage.json', browser: 'test-chromium' }
 
 function stub(gpu = hardware) {
   const calls = { closes: 0, detaches: 0, pages: [] }
@@ -30,7 +30,8 @@ test('default launch preserves browser defaults and reports actual graphics', as
   assert.equal(result.graphics.hardwareAccelerated, false)
   assert.equal(result.graphics.fallbackReason, undefined)
   assert.deepEqual(launch.mock.calls[0].arguments[0], {
-    executablePath: config.browser, args: ['--force-device-scale-factor=2'],
+    // The window matches the recording's pixels, so DOM fullscreen keeps the viewport.
+    executablePath: config.browser, args: ['--force-device-scale-factor=2', '--window-size=640,480'],
     handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false,
   })
   assert.deepEqual(s.calls.pages, [{ viewport: config.viewport, deviceScaleFactor: 2, storageState: config.storageState }])
@@ -41,8 +42,8 @@ test('default launch preserves browser defaults and reports actual graphics', as
 test('off forces software and does not attempt a GPU launch', async (t) => {
   const s = stub(software)
   const launch = t.mock.method(chromium, 'launch', async () => s.browser)
-  const result = await launchBrowser({ ...config, scale: 1, gpu: 'off' }, { handleSignals: true })
-  assert.deepEqual(launch.mock.calls[0].arguments[0].args, ['--disable-gpu', '--disable-accelerated-video-decode'])
+  const result = await launchBrowser({ ...config, scale: 1, video: { width: 320, height: 240 }, gpu: 'off' }, { handleSignals: true })
+  assert.deepEqual(launch.mock.calls[0].arguments[0].args, ['--window-size=320,240', '--disable-gpu', '--disable-accelerated-video-decode'])
   assert.equal(launch.mock.callCount(), 1)
   assert.equal(result.graphics.requested, 'off')
 })
@@ -54,6 +55,7 @@ test('auto chooses the platform backend and accepts verified hardware', async (t
   const args = launch.mock.calls[0].arguments[0].args
   assert.ok(args.includes('--enable-gpu'))
   assert.ok(args.includes('--disable-accelerated-video-decode'))
+  assert.ok(args.includes('--window-size=640,480'))
   assert.equal(args.includes('--use-angle=gl-egl'), process.platform === 'linux')
   assert.equal(args.includes('--ozone-platform=headless'), process.platform === 'linux')
   assert.equal(result.graphics.hardwareAccelerated, true)
@@ -82,7 +84,7 @@ test('macOS and Windows auto launches leave backend selection to Chromium', asyn
       const result = await launchBrowser({ ...config, gpu: 'auto' }, { handleSignals: true })
       const args = launch.mock.calls.at(-1).arguments[0].args
       assert.equal(result.graphics.requestedBackend, 'default')
-      assert.deepEqual(args, ['--force-device-scale-factor=2', '--enable-gpu', '--disable-accelerated-video-decode'])
+      assert.deepEqual(args, ['--force-device-scale-factor=2', '--window-size=640,480', '--enable-gpu', '--disable-accelerated-video-decode'])
     }
   } finally {
     Object.defineProperty(process, 'platform', platform)
@@ -107,7 +109,7 @@ for (const failure of ['software', 'unavailable', 'launch', 'page']) {
     assert.equal(result.graphics.hardwareAccelerated, false)
     assert.equal(result.graphics.fallbackReason, failure === 'software' ? 'software-rendering' : failure === 'unavailable' ? 'graphics-check-unavailable' : 'gpu-launch-failed')
     assert.equal(launch.mock.callCount(), 2)
-    assert.deepEqual(launch.mock.calls[1].arguments[0].args, ['--force-device-scale-factor=2', '--disable-gpu', '--disable-accelerated-video-decode'])
+    assert.deepEqual(launch.mock.calls[1].arguments[0].args, ['--force-device-scale-factor=2', '--window-size=640,480', '--disable-gpu', '--disable-accelerated-video-decode'])
     assert.equal(second.calls.closes, 0)
   })
 }

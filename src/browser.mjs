@@ -6,7 +6,12 @@ import { TraceframeError } from './errors.mjs'
 export async function launchBrowser(config, { handleSignals, signal }) {
   const requested = config.gpu ?? 'default'
   const backend = config.gpuBackend ?? (process.platform === 'linux' ? 'gl-egl' : 'default')
-  const baseArgs = config.scale === 2 ? ['--force-device-scale-factor=2'] : []
+  // The headless shell sizes DOM fullscreen from its window (800×600 pixels by default).
+  // Match the recording so a fullscreen page keeps the requested viewport.
+  const baseArgs = [
+    ...(config.scale === 2 ? ['--force-device-scale-factor=2'] : []),
+    `--window-size=${config.video.width},${config.video.height}`,
+  ]
   const softwareArgs = ['--disable-gpu', '--disable-accelerated-video-decode']
   const gpuArgs = ['--enable-gpu', '--disable-accelerated-video-decode']
   if (backend !== 'default') gpuArgs.push(`--use-angle=${backend}`)
