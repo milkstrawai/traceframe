@@ -20,6 +20,10 @@ export function createConfig(options = {}) {
   check(options.url, 'A URL is required (the url option, or --url).')
   const readyTimeout = options.readyTimeout ?? 30
   check(Number.isFinite(readyTimeout) && readyTimeout > 0, 'Ready timeout must be more than 0 seconds.')
+  const gpu = options.gpu ?? 'default'
+  check(['default', 'auto', 'off'].includes(gpu), 'GPU must be default, auto, or off.')
+  check(options.gpuBackend === undefined || gpu === 'auto', 'GPU backend requires gpu: auto (--gpu auto).')
+  check(options.gpuBackend === undefined || ['default', 'gl-egl', 'metal'].includes(options.gpuBackend), 'GPU backend must be default, gl-egl, or metal.')
 
   return {
     ...recordingConfig(options, viewport, preset),
@@ -27,6 +31,8 @@ export function createConfig(options = {}) {
     flow: resolve(options.flow),
     storageState: options.storageState,
     browser: options.browser ?? process.env.CHROME_PATH,
+    gpu,
+    gpuBackend: options.gpuBackend,
     readyTimeout,
   }
 }
@@ -37,7 +43,7 @@ export function createPageConfig(options = {}) {
   check(!page.isClosed(), 'The supplied page is closed.')
   const viewport = page.viewportSize()
   check(viewport, 'recordPage requires a fixed viewport. Set it when creating the page or context; viewport: null is not supported.')
-  for (const key of ['url', 'browser', 'storageState', 'readyTimeout', 'viewportWidth', 'viewportHeight', 'preset']) {
+  for (const key of ['url', 'browser', 'gpu', 'gpuBackend', 'storageState', 'readyTimeout', 'viewportWidth', 'viewportHeight', 'preset']) {
     check(options[key] === undefined, `recordPage does not accept ${key}; prepare the page before recording and use scale/fps for video settings.`)
   }
   return recordingConfig(options, viewport, { scale: 1, fps: 30 })

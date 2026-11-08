@@ -47,3 +47,10 @@ test('parses capture quality as a number and capture diagnostics as a flag', asy
   assert.match((await run('record', ...flowArgs, '--capture-quality', '101')).stderr, /Capture quality must be an integer/)
   assert.match((await run('record', '--url', 'file:///tmp/page.html', '--flow', 'missing-flow.mjs', '--capture-quality', '80', '--capture-diagnostics')).stderr, /Could not load flow/)
 })
+
+test('parses GPU mode and backend without treating them as booleans or numbers', async () => {
+  assert.match((await run('--help')).stdout, /--gpu <default\|auto\|off>/)
+  assert.match((await run('record', ...flowArgs, '--gpu', 'on')).stderr, /GPU must be/)
+  assert.match((await run('record', ...flowArgs, '--gpu-backend', 'gl-egl')).stderr, /GPU backend requires/)
+  assert.match((await run('record', '--url', 'about:blank', '--flow', 'missing-flow.mjs', '--gpu', 'auto', '--gpu-backend', 'default')).stderr, /Could not load flow/)
+})

@@ -34,7 +34,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "cd test && node --test",
     "test:smoke": "node scripts/smoke.mjs",
     "test:package": "node scripts/package-smoke.mjs",
     "build:assets": "node scripts/build-assets.mjs"

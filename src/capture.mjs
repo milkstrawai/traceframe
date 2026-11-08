@@ -2,13 +2,13 @@ import { addAbortListener } from 'node:events'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { chromium } from 'playwright'
 
 import { TraceframeError } from './errors.mjs'
 import { addDiagnostics, retainedFile } from './diagnostics.mjs'
 import { createFlowApi } from './flow.mjs'
 import { createCaptureStats } from './capture-stats.mjs'
 import { createJpegCapture } from './jpeg-capture.mjs'
+import { launchBrowser, inspectGraphics } from './browser.mjs'
 
 const PLAYWRIGHT_DEFAULT_TIMEOUT = 30_000
 const FIRST_FRAME_TIMEOUT = 10_000
@@ -22,7 +22,9 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
   const stats = config.captureDiagnostics ? createCaptureStats() : undefined
 
   signal.throwIfAborted()
-  const browser = page ? undefined : await launchBrowser(config, { handleSignals: !callerSignal })
+  const launched = page ? undefined : await launchBrowser(config, { handleSignals: !callerSignal, signal })
+  const browser = launched?.browser
+  let graphics = launched?.graphics
   let clock
   let recording = false
   let failed = false
@@ -33,12 +35,13 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
   }
   try {
     if (browser) {
-      page = await browser.newPage({ viewport: config.viewport, deviceScaleFactor: config.scale, storageState: config.storageState })
+      page = launched.page
       await raceAbort(waitForReady(page, flow, config, signal), signal)
       signal.throwIfAborted()
       await page.mouse.move(trace.initialPointer.x, trace.initialPointer.y)
     } else {
       await assertPageGeometry(page, config, signal)
+      graphics = { requested: 'caller', ...await inspectGraphics(page.context().browser(), signal) }
     }
 
     const firstFrame = Promise.withResolvers()
@@ -79,7 +82,7 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
     // Stop the page subscription only once, including when shutdown fails.
     recording = false
     await stopCapture()
-    return { rawPath, trace, startedAt: clock, ...(stats ? { captureStats: { ...stats.summary(), ...capture.stats } } : {}) }
+    return { rawPath, trace, startedAt: clock, graphics, ...(stats ? { captureStats: { ...stats.summary(), ...capture.stats } } : {}) }
   } catch (error) {
     failed = true
     // A writer failure during cleanup must not replace the initiating failure.
@@ -152,24 +155,6 @@ async function saveFailureScreenshot(page, directory, signal) {
     }, FAILURE_SCREENSHOT_TIMEOUT, new Error('Failure screenshot timed out.'), signal)
   } catch {
     return undefined
-  }
-}
-
-async function launchBrowser(config, { handleSignals }) {
-  try {
-    return await chromium.launch({
-      executablePath: config.browser,
-      args: config.scale === 2 ? ['--force-device-scale-factor=2'] : [],
-      handleSIGINT: handleSignals,
-      handleSIGTERM: handleSignals,
-      handleSIGHUP: handleSignals,
-    })
-  } catch (error) {
-    if (!/Executable doesn't exist/i.test(error.message)) throw error
-    const message = config.browser
-      ? `Configured browser executable is unavailable: ${config.browser}`
-      : 'Playwright Chromium is not installed. Run `npx playwright@1.64.1 install --only-shell chromium`, or pass --browser to a Chrome executable.'
-    throw new TraceframeError(message, { code: 'PLAYWRIGHT_RUNTIME_MISSING', cause: error })
   }
 }
 

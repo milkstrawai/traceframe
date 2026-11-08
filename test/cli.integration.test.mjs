@@ -86,9 +86,9 @@ test('CLI Ctrl-C keeps exit 130, interruption messages and partial capture witho
   })
 })
 
-test('CLI success remains a single JSON summary with empty stderr', { timeout: 30_000 }, async () => {
+test('CLI GPU auto success remains a single JSON summary with empty stderr', { timeout: 30_000 }, async () => {
   await withFixture('export default async ({ wait }) => { await wait(0.1) }', async ({ run, directory }) => {
-    const result = await run()
+    const result = await run('--gpu', 'auto')
     assert.equal(result.code, 0)
     assert.equal(result.stderr, '')
     assert.equal(result.stdout.trim().split('\n').length, 1)
@@ -101,5 +101,7 @@ test('CLI success remains a single JSON summary with empty stderr', { timeout: 3
     assert.equal(summary.clickCount, 0)
     assert.equal(summary.diagnostics, undefined)
     assert.equal(summary.runDirectory, undefined)
+    assert.equal(summary.graphics.requested, 'auto')
+    assert.ok(summary.graphics.hardwareAccelerated === true || summary.graphics.fallbackReason)
   })
 })

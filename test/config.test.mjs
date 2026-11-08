@@ -71,9 +71,21 @@ test('existing-page settings reject implicit browser setup and unfixed viewports
   assert.throws(() => createPageConfig(), { code: 'INVALID_CONFIG' })
   assert.throws(() => createPageConfig({ page: { ...page, viewportSize: () => null } }), /fixed viewport/)
   assert.throws(() => createPageConfig({ page: { ...page, isClosed: () => true } }), /closed/)
-  for (const key of ['url', 'browser', 'storageState', 'readyTimeout', 'viewportWidth', 'viewportHeight', 'preset']) {
+  for (const key of ['url', 'browser', 'gpu', 'gpuBackend', 'storageState', 'readyTimeout', 'viewportWidth', 'viewportHeight', 'preset']) {
     assert.throws(() => createPageConfig({ page, [key]: 'unused' }), { code: 'INVALID_CONFIG', message: new RegExp(`does not accept ${key}`) })
   }
+})
+
+test('GPU acceleration is opt-in and backend overrides require auto mode', () => {
+  assert.equal(createConfig(base).gpu, 'default')
+  for (const gpu of ['default', 'auto', 'off']) assert.equal(createConfig({ ...base, gpu }).gpu, gpu)
+  for (const gpu of [true, false, 'on', '', 1]) assert.throws(() => createConfig({ ...base, gpu }), { code: 'INVALID_CONFIG' })
+  for (const gpuBackend of ['default', 'gl-egl', 'metal']) {
+    assert.equal(createConfig({ ...base, gpu: 'auto', gpuBackend }).gpuBackend, gpuBackend)
+    assert.throws(() => createConfig({ ...base, gpuBackend }), /GPU backend requires/)
+    assert.throws(() => createConfig({ ...base, gpu: 'off', gpuBackend }), /GPU backend requires/)
+  }
+  assert.throws(() => createConfig({ ...base, gpu: 'auto', gpuBackend: '--arbitrary-flag' }), /GPU backend must/)
 })
 
 test('both recording paths normalize external audio with an explicit offset', () => {

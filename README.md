@@ -67,7 +67,7 @@ Since v0.6.0, the retained raw file is `capture.mkv` instead of `capture.webm`; 
 
 Traceframe saves Chromium's JPEG frames and presentation timestamps directly into a temporary `capture.mkv`, then encodes the final MP4 after the flow ends. This avoids a live intermediate video encode and works with CPU or GPU browser rendering. Chromium frame timestamps are retained with microsecond precision; a 150 ms buffer orders delayed arrivals. The first received frame establishes the audio clock, so subsequently delivered frames older than that origin are dropped. Slow storage applies backpressure. Moving content needs more temporary disk space than an inter-frame codec: at high resolution, allow hundreds of megabytes for short takes and potentially gigabytes for longer ones. Static pages need only a few stored frames. If your temporary directory is backed by RAM, choose a disk-backed `--run-dir` for large takes and remove it afterward. The final renderer supplies the requested frame rate while keeping cursor animations smooth.
 
-GPU rendering and hardware video decoding can help the browser, but frame export still costs CPU. The bundled headless browser used software rendering on the tested Linux setup; selecting an executable or adding a GPU flag does not guarantee acceleration. For a caller-owned browser, configure and verify its GPU use before `recordPage`; use full Chromium for extensions. A GPU capability flag alone does not establish that the active video is hardware-decoded. When measuring performance, keep the browser version, source codec, viewport and device scale fixed, and compare recorded image updates and audio timing as well as file metadata.
+GPU rendering can help the browser, but frame export still costs CPU. Use [`--gpu auto`](#gpu-rendering) to request verified acceleration with software fallback. When measuring performance, keep the browser version, source codec, viewport and device scale fixed, and compare recorded image updates and audio timing as well as file metadata.
 
 Start performance comparisons with the Chromium build bundled with Playwright. A custom `--browser` executable can have different screencast performance even when recording succeeds. Traceframe preserves your requested resolution and quality. If the workload cannot sustain the desired cadence, increasing the encoded FPS repeats existing frames; choose a lower quality or smaller dimensions explicitly if that tradeoff suits your recording.
 
@@ -76,6 +76,22 @@ For video-heavy flows, see [checking video playback](docs/recording-flows.md#che
 Use `--run-dir .traceframe/runs/name` (`runDirectory` in the API) to keep the raw capture and FFmpeg filter file, including a partial capture if the flow fails during recording. An interrupted or failed capture can be incomplete; a retained file is not proof that recording finalized successfully. On a preparation or recording failure, Traceframe also tries to save a viewport screenshot as `failure.png`. Keep that directory out of Git, because captures and screenshots can contain private page data.
 
 When available, failure output includes the error code, flow-file locations, elapsed recording time, and paths to artifacts saved for that attempt. Without `--run-dir`, temporary captures are removed and no failure screenshot is saved. See [diagnosing a failed take](docs/recording-flows.md#diagnose-a-failed-take).
+
+### GPU rendering
+
+Add `--gpu auto` to a recording command, or `gpu: 'auto'` to `record()`. Traceframe checks Chromium's compositing status and renderer before navigation. If acceleration is unavailable or the GPU browser fails to start, it closes that attempt and tries software rendering once. Navigation, `ready` and the flow run only on the selected browser; a later recording failure is not retried.
+
+| Setting | Behavior |
+| --- | --- |
+| `--gpu default` | Keep the browser's launch defaults; this is the default. |
+| `--gpu auto` | Try hardware rendering, then fall back to software if it cannot be verified. |
+| `--gpu off` | Explicitly request software rendering. |
+
+Auto mode uses headless EGL on Linux and Chromium's platform backend elsewhere (Metal on the tested Mac). Override it with `--gpu-backend default`, `gl-egl`, or `metal` (`gpuBackend` in the API); an override requires auto mode and still permits fallback. GPU access and driver support depend on the environment. These launch configurations have recording evidence on Linux Intel/Mesa and Apple M3 Pro; Windows hardware acceleration has not been validated.
+
+The JSON result includes `graphics`: `requested`, `hardwareAccelerated`, `compositing`, `rasterization` and `renderer`. `hardwareAccelerated: null` means the check was unavailable. Auto mode also reports `requestedBackend` and, on fallback, `fallbackReason`. These describe the startup graphics check, not GPU utilization or a guarantee of smooth playback. No GPU drivers or permissions are changed.
+
+Auto and off modes keep video decoding in software. JPEG capture and final MP4 encoding still use CPU work; GPU rendering is not hardware video encoding. Smoother capture can store more frames and increase temporary storage and export time. For `recordPage`, configure the caller's browser yourself; GPU launch options are rejected, and the result reports its graphics with `requested: 'caller'`. Use full Chromium for extensions.
 
 ## Write a flow
 
