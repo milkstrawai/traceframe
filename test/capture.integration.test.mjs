@@ -31,6 +31,35 @@ test('flow actions keep the normal timeout after a short ready timeout', { timeo
   }
 })
 
+test('a viewport change during the flow stops capture with CAPTURE_SIZE_CHANGED', { timeout: 60_000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'traceframe-resize-'))
+  try {
+    const page = join(directory, 'page.html')
+    const flowPath = join(directory, 'flow.mjs')
+    await writeFile(page, '<p>Resize</p>')
+    await writeFile(flowPath, `export let resizedAt
+export default async ({ page, wait }) => {
+  await wait(0.3)
+  await page.setViewportSize({ width: 300, height: 180 })
+  resizedAt = performance.now()
+  await wait(30)
+}
+`)
+    const config = createConfig({ url: pathToFileURL(page).href, flow: flowPath, viewportWidth: 320, viewportHeight: 200, scale: 1, fps: 30, postRoll: 0, flowTimeout: 45 })
+
+    await assert.rejects(captureFlow({ config, flow: await loadFlow(flowPath, config.viewport), directory }), error => {
+      assert.equal(error.code, 'CAPTURE_SIZE_CHANGED')
+      assert.match(error.message, /from 320×200 for a 320×200 viewport to 300×180 for a 300×180 viewport/)
+      return true
+    })
+    // Stopped by the first resized frame, not by the flow's 30-second wait.
+    const { resizedAt } = await import(pathToFileURL(flowPath).href)
+    assert.ok(performance.now() - resizedAt < 10_000)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
 // The default headless shell used to size DOM fullscreen from its 800×600 window.
 const enterFullscreen = `await page.getByRole('button', { name: 'Fullscreen' }).click()
   await page.waitForFunction(() => document.fullscreenElement)`

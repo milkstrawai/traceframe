@@ -54,6 +54,37 @@ for (const scenario of ['flow fails', 'caller cancels', 'writer fails']) {
   })
 }
 
+test('a frame size change stops the recording at once instead of truncating the export', async () => {
+  const directory = await fs.mkdtemp(join(tmpdir(), 'traceframe-resize-'))
+  // JPEG headers only: 32×24 frames, then 16×12 after the page changes size.
+  const first = Buffer.from('ffd8ffc00011080018002003012200021101031101ffd9', 'hex')
+  const resized = Buffer.from('ffd8ffc0001108000c001003012200021101031101ffd9', 'hex')
+  let onFrame
+  const page = {
+    context: () => ({ browser: () => undefined }),
+    evaluate: async () => [32, 24, 1, 0, 0], mouse: { move: async () => {} },
+    screencast: {
+      async start(options) { onFrame = options.onFrame; await onFrame({ data: first, timestamp: Date.now(), viewportWidth: 32, viewportHeight: 24 }) },
+      async stop() {},
+    },
+  }
+  try {
+    await assert.rejects(captureFlow({ directory, page,
+      config: { video: { width: 32, height: 24, fps: 60 }, viewport: { width: 32, height: 24 }, captureQuality: 85, flowTimeout: 5, postRoll: 0 },
+      flow: { initialPointer: { x: 0, y: 0 }, async run({ wait }) {
+        await onFrame({ data: first, timestamp: Date.now() + 16, viewportWidth: 32, viewportHeight: 24 })
+        await onFrame({ data: resized, timestamp: Date.now() + 33, viewportWidth: 16, viewportHeight: 12 })
+        await wait(5)
+      } },
+    }), {
+      code: 'CAPTURE_SIZE_CHANGED',
+      message: 'Screencast frames changed size during recording, from 32×24 for a 32×24 viewport to 16×12 for a 16×12 viewport. Keep the page geometry fixed while recording.',
+    })
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true })
+  }
+})
+
 test('caller cancellation interrupts graphics inspection without changing the caller browser', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   const started = Promise.withResolvers(), response = Promise.withResolvers()

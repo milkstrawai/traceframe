@@ -47,9 +47,18 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
     const firstFrame = Promise.withResolvers()
     signal.throwIfAborted()
     capture = createJpegCapture(rawPath, { ...config.video, onError: cause => captureErrors.abort(new TraceframeError(`Could not save capture: ${cause.message}`, { code: 'CAPTURE_FAILED', cause })) })
+    let firstSize
     await page.screencast.start({ size: { width: config.video.width, height: config.video.height }, fps: config.video.fps, quality: config.captureQuality, onFrame: (frame) => {
       stats?.observe(frame.timestamp, performance.now())
       firstFrame.resolve(frame)
+      // The first frame is checked against the request below. A later size change would
+      // otherwise surface only after export, as a truncated video.
+      const size = frameSize(frame)
+      firstSize ??= size
+      if (!sameSize(size, firstSize)) {
+        captureErrors.abort(new TraceframeError(`Screencast frames changed size during recording, from ${describeSize(firstSize)} to ${describeSize(size)}. Keep the page geometry fixed while recording.`, { code: 'CAPTURE_SIZE_CHANGED' }))
+        return
+      }
       return capture.append(frame)
     } })
     recording = true
@@ -120,13 +129,27 @@ async function assertPageGeometry(page, config, signal) {
   }
 }
 
+// [JPEG width, JPEG height, viewport width, viewport height]; the JPEG values are undefined if unreadable.
+function frameSize(frame) {
+  const jpeg = jpegSize(frame.data)
+  return [jpeg?.width, jpeg?.height, frame.viewportWidth, frame.viewportHeight]
+}
+
+function sameSize(a, b) {
+  return a.every((value, index) => value === b[index])
+}
+
+function describeSize([width, height, viewportWidth, viewportHeight]) {
+  return `${width === undefined ? 'an unreadable JPEG' : `${width}×${height}`} for a ${viewportWidth}×${viewportHeight} viewport`
+}
+
 function assertFrameSize(frame, config) {
   // Check the exported JPEG dimensions; deviceScaleFactor alone is insufficient.
-  const size = jpegSize(frame.data)
-  if (size?.width !== config.video.width || size?.height !== config.video.height ||
-      frame.viewportWidth !== config.viewport.width || frame.viewportHeight !== config.viewport.height) {
+  const size = frameSize(frame)
+  const expected = [config.video.width, config.video.height, config.viewport.width, config.viewport.height]
+  if (!sameSize(size, expected)) {
     const scaleHint = config.scale === 2 ? ' For scale 2, launch Chromium with --force-device-scale-factor=2; deviceScaleFactor alone is insufficient.' : ''
-    throw new TraceframeError(`Screencast frames are ${size ? `${size.width}×${size.height}` : 'not a readable JPEG'} for a ${frame.viewportWidth}×${frame.viewportHeight} viewport; expected ${config.video.width}×${config.video.height} for a ${config.viewport.width}×${config.viewport.height} viewport. Keep the viewport fixed and use the page exclusively for this recording.${scaleHint}`, { code: 'CAPTURE_SIZE_MISMATCH' })
+    throw new TraceframeError(`Screencast frames are ${describeSize(size)}; expected ${describeSize(expected)}. Keep the viewport fixed and use the page exclusively for this recording.${scaleHint}`, { code: 'CAPTURE_SIZE_MISMATCH' })
   }
 }
 
