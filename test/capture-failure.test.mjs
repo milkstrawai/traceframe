@@ -4,6 +4,8 @@ import fs from 'node:fs/promises'
 import { syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { chromium } from 'playwright'
+
 import { captureFlow } from '../src/capture.mjs'
 
 for (const scenario of ['flow fails', 'caller cancels', 'writer fails']) {
@@ -104,3 +106,16 @@ test('30 FPS recordings keep the larger in-flight frame allowance', async () => 
   }
   assert.equal(requested, 60)
 })
+
+for (const stage of ['launch', 'page creation']) {
+  test(`cancellation during the browser ${stage} closes it before navigation`, async (t) => {
+    const controller = new AbortController(), reason = new Error(`stop during ${stage}`), calls = []
+    const browser = {
+      async newPage() { calls.push('newPage'); controller.abort(reason); return { async goto() { calls.push('goto') } } },
+      async close() { calls.push('close') },
+    }
+    t.mock.method(chromium, 'launch', async () => { if (stage === 'launch') controller.abort(reason); return browser })
+    await assert.rejects(captureFlow({ directory: tmpdir(), signal: controller.signal, config: { gpu: 'off', video: { width: 32, height: 24 } }, flow: {} }), error => error === reason)
+    assert.deepEqual(calls, stage === 'launch' ? ['close'] : ['newPage', 'close'])
+  })
+}

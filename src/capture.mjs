@@ -37,7 +37,10 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
   }
   try {
     if (browser) {
+      // A browser launch cannot be interrupted, so check before creating the page and again before navigation.
+      signal.throwIfAborted()
       page = await browser.newPage({ viewport: config.viewport, deviceScaleFactor: config.scale, storageState: config.storageState })
+      signal.throwIfAborted()
       await raceAbort(waitForReady(page, flow, config, signal), signal)
       signal.throwIfAborted()
       await page.mouse.move(trace.initialPointer.x, trace.initialPointer.y)
