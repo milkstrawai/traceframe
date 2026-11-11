@@ -8,6 +8,21 @@ import { chromium } from 'playwright'
 
 import { captureFlow } from '../src/capture.mjs'
 
+// JPEG headers only: the stub pages supply frame geometry, and no video decoding is involved.
+const jpeg32x24 = Buffer.from('ffd8ffc00011080018002003012200021101031101ffd9', 'hex')
+const jpeg16x12 = Buffer.from('ffd8ffc0001108000c001003012200021101031101ffd9', 'hex')
+const config = { video: { width: 32, height: 24, fps: 60 }, viewport: { width: 32, height: 24 }, captureQuality: 85, flowTimeout: 5, postRoll: 0 }
+const frame = (data = jpeg32x24, viewportWidth = 32, viewportHeight = 24) => ({ data, timestamp: Date.now(), viewportWidth, viewportHeight })
+
+// A caller page whose screencast delivers one 32×24 frame when it starts.
+function stubPage(screencast) {
+  return {
+    evaluate: async () => [32, 24, 1, 0, 0], mouse: { move: async () => {} },
+    screenshot: async () => Buffer.from('synthetic screenshot'),
+    screencast: { async start({ onFrame }) { await onFrame(frame()) }, async stop() {}, ...screencast },
+  }
+}
+
 for (const scenario of ['flow fails', 'caller cancels', 'writer fails']) {
   test(`${scenario}: a capture finalization failure preserves the appropriate reason`, async (t) => {
     const directory = await fs.mkdtemp(join(tmpdir(), 'traceframe-failure-'))
@@ -21,19 +36,10 @@ for (const scenario of ['flow fails', 'caller cancels', 'writer fails']) {
     })
     syncBuiltinESMExports()
     let stops = 0
-    // The page stub supplies a JPEG header for geometry; no video decoding is involved.
-    const data = Buffer.from('ffd8ffc00011080018002003012200021101031101ffd9', 'hex')
-    const page = {
-      evaluate: async () => [32, 24, 1, 0, 0], mouse: { move: async () => {} },
-      screenshot: async () => Buffer.from('synthetic screenshot'),
-      screencast: {
-        async start({ onFrame }) { await onFrame({ data, timestamp: Date.now(), viewportWidth: 32, viewportHeight: 24 }) },
-        async stop() { stops++ },
-      },
-    }
+    const page = stubPage({ async stop() { stops++ } })
     try {
       await assert.rejects(captureFlow({ directory, page, signal: controller.signal,
-        config: { video: { width: 32, height: 24, fps: 60 }, viewport: { width: 32, height: 24 }, captureQuality: 95, flowTimeout: 1, postRoll: 0, runDirectory: directory },
+        config: { ...config, flowTimeout: 1, runDirectory: directory },
         flow: { initialPointer: { x: 0, y: 0 }, async run() {
           if (scenario === 'flow fails') throw primary
           if (scenario === 'caller cancels') { controller.abort(primary); await new Promise(() => {}) }
@@ -58,23 +64,13 @@ for (const scenario of ['flow fails', 'caller cancels', 'writer fails']) {
 
 test('a frame size change stops the recording at once instead of truncating the export', async () => {
   const directory = await fs.mkdtemp(join(tmpdir(), 'traceframe-resize-'))
-  // JPEG headers only: 32×24 frames, then 16×12 after the page changes size.
-  const first = Buffer.from('ffd8ffc00011080018002003012200021101031101ffd9', 'hex')
-  const resized = Buffer.from('ffd8ffc0001108000c001003012200021101031101ffd9', 'hex')
   let onFrame
-  const page = {
-    evaluate: async () => [32, 24, 1, 0, 0], mouse: { move: async () => {} },
-    screencast: {
-      async start(options) { onFrame = options.onFrame; await onFrame({ data: first, timestamp: Date.now(), viewportWidth: 32, viewportHeight: 24 }) },
-      async stop() {},
-    },
-  }
+  const page = stubPage({ async start(options) { onFrame = options.onFrame; await onFrame(frame()) } })
   try {
-    await assert.rejects(captureFlow({ directory, page,
-      config: { video: { width: 32, height: 24, fps: 60 }, viewport: { width: 32, height: 24 }, captureQuality: 85, flowTimeout: 5, postRoll: 0 },
+    await assert.rejects(captureFlow({ directory, page, config,
       flow: { initialPointer: { x: 0, y: 0 }, async run({ wait }) {
-        await onFrame({ data: first, timestamp: Date.now() + 16, viewportWidth: 32, viewportHeight: 24 })
-        await onFrame({ data: resized, timestamp: Date.now() + 33, viewportWidth: 16, viewportHeight: 12 })
+        await onFrame({ ...frame(), timestamp: Date.now() + 16 })
+        await onFrame({ ...frame(jpeg16x12, 16, 12), timestamp: Date.now() + 33 })
         await wait(5)
       } },
     }), {
@@ -89,18 +85,10 @@ test('a frame size change stops the recording at once instead of truncating the 
 test('30 FPS recordings keep the larger in-flight frame allowance', async () => {
   // Playwright 1.64 uses fps only to let Chromium have 10 frames in flight above 30, otherwise 5.
   const directory = await fs.mkdtemp(join(tmpdir(), 'traceframe-screencast-fps-'))
-  const data = Buffer.from('ffd8ffc00011080018002003012200021101031101ffd9', 'hex')
   let requested
-  const page = {
-    evaluate: async () => [32, 24, 1, 0, 0], mouse: { move: async () => {} },
-    screencast: {
-      async start(options) { requested = options.fps; await options.onFrame({ data, timestamp: Date.now(), viewportWidth: 32, viewportHeight: 24 }) },
-      async stop() {},
-    },
-  }
+  const page = stubPage({ async start(options) { requested = options.fps; await options.onFrame(frame()) } })
   try {
-    await captureFlow({ directory, page, flow: { initialPointer: { x: 0, y: 0 }, async run() {} },
-      config: { video: { width: 32, height: 24, fps: 30 }, viewport: { width: 32, height: 24 }, captureQuality: 85, flowTimeout: 5, postRoll: 0 } })
+    await captureFlow({ directory, page, flow: { initialPointer: { x: 0, y: 0 }, async run() {} }, config: { ...config, video: { ...config.video, fps: 30 } } })
   } finally {
     await fs.rm(directory, { recursive: true, force: true })
   }
