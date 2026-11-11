@@ -4,7 +4,7 @@ import { addAbortListener } from 'node:events'
 export async function withDeadline(task, milliseconds, error, signal) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(error), milliseconds)
-  const deadline = AbortSignal.any([signal, controller.signal])
+  const deadline = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
   try {
     deadline.throwIfAborted()
     return await raceAbort(task(deadline), deadline)

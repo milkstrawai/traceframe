@@ -45,11 +45,12 @@ export default async ({ page, wait }) => {
   await wait(30)
 }
 `)
-    const config = createConfig({ url: pathToFileURL(page).href, flow: flowPath, viewportWidth: 320, viewportHeight: 200, scale: 1, fps: 30, postRoll: 0, flowTimeout: 45 })
+    const config = createConfig({ url: pathToFileURL(page).href, flow: flowPath, viewportWidth: 320, viewportHeight: 200, scale: 1, fps: 30, postRoll: 0, flowTimeout: 45, runDirectory: directory })
 
     await assert.rejects(captureFlow({ config, flow: await loadFlow(flowPath, config.viewport), directory }), error => {
       assert.equal(error.code, 'CAPTURE_SIZE_CHANGED')
       assert.match(error.message, /from 320×200 for a 320×200 viewport to 300×180 for a 300×180 viewport/)
+      assert.equal(error.diagnostics.screenshotPath, join(directory, 'failure.png'))
       return true
     })
     // Stopped by the first resized frame, not by the flow's 30-second wait.

@@ -104,7 +104,8 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
         .then(() => capture?.stop())
         .then(() => clock !== undefined && config.runDirectory ? retainedFile(rawPath) : undefined)
         .catch(() => undefined),
-      config.runDirectory && page && !signal.aborted ? saveFailureScreenshot(page, directory, signal) : undefined,
+      // A frame size change or a capture write error also aborts signal; only caller cancellation skips this.
+      config.runDirectory && page && !callerSignal?.aborted ? saveFailureScreenshot(page, directory, callerSignal) : undefined,
     ])
     if (callerSignal?.aborted) throw callerSignal.reason
     throw await addDiagnostics(failure, { flow: config.flow, recordingTime, capturePath, screenshotPath })

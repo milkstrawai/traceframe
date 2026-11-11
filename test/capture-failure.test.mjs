@@ -41,6 +41,8 @@ for (const scenario of ['flow fails', 'caller cancels', 'writer fails']) {
         else if (scenario === 'flow fails') { assert.equal(error.code, 'FLOW_FAILED'); assert.equal(error.cause, primary) }
         else { assert.equal(error.code, 'CAPTURE_FAILED'); assert.equal(error.cause, disk) }
         assert.equal(error.diagnostics?.capturePath, undefined)
+        // Internal failures keep their screenshot; caller cancellation skips it.
+        assert.equal(error.diagnostics?.screenshotPath, scenario === 'caller cancels' ? undefined : join(directory, 'failure.png'))
         return true
       })
       assert.equal(stops, 1)
