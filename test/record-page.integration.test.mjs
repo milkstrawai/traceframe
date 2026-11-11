@@ -50,7 +50,7 @@ for (const scale of [1, 2]) {
       assert.equal(result.clickCount, 1)
       assert.equal(result.width, viewport.width * scale)
       assert.equal(result.height, viewport.height * scale)
-      assert.equal(typeof result.graphics.hardwareAccelerated, 'boolean')
+      assert.equal('graphics' in result, false)
       assert.equal(page.isClosed(), false)
       assert.equal(page.url(), url)
       assert.deepEqual(page.viewportSize(), viewport)
@@ -66,8 +66,7 @@ for (const scale of [1, 2]) {
 
 test('records from a persistent context and leaves it usable', { timeout: 30_000 }, async () => {
   await withPage(async ({ page, context, options }) => {
-    const result = await recordPage({ ...options, flow: async ({ click }) => click(page.getByRole('button'), { duration: 0.01, dwell: 0 }) })
-    assert.equal(typeof result.graphics.hardwareAccelerated, 'boolean')
+    await recordPage({ ...options, flow: async ({ click }) => click(page.getByRole('button'), { duration: 0.01, dwell: 0 }) })
     assert.equal(await page.getByRole('button').textContent(), 'Saved')
     assert.ok(context.pages().includes(page))
     const next = await context.newPage()

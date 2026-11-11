@@ -4,7 +4,6 @@ import fs from 'node:fs/promises'
 import { syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { setImmediate as nextTurn } from 'node:timers/promises'
 import { captureFlow } from '../src/capture.mjs'
 
 for (const scenario of ['flow fails', 'caller cancels', 'writer fails']) {
@@ -23,7 +22,6 @@ for (const scenario of ['flow fails', 'caller cancels', 'writer fails']) {
     // The page stub supplies a JPEG header for geometry; no video decoding is involved.
     const data = Buffer.from('ffd8ffc00011080018002003012200021101031101ffd9', 'hex')
     const page = {
-      context: () => ({ browser: () => undefined }),
       evaluate: async () => [32, 24, 1, 0, 0], mouse: { move: async () => {} },
       screenshot: async () => Buffer.from('synthetic screenshot'),
       screencast: {
@@ -61,7 +59,6 @@ test('a frame size change stops the recording at once instead of truncating the 
   const resized = Buffer.from('ffd8ffc0001108000c001003012200021101031101ffd9', 'hex')
   let onFrame
   const page = {
-    context: () => ({ browser: () => undefined }),
     evaluate: async () => [32, 24, 1, 0, 0], mouse: { move: async () => {} },
     screencast: {
       async start(options) { onFrame = options.onFrame; await onFrame({ data: first, timestamp: Date.now(), viewportWidth: 32, viewportHeight: 24 }) },
@@ -91,7 +88,6 @@ test('30 FPS recordings keep the larger in-flight frame allowance', async () => 
   const data = Buffer.from('ffd8ffc00011080018002003012200021101031101ffd9', 'hex')
   let requested
   const page = {
-    context: () => ({ browser: () => undefined }),
     evaluate: async () => [32, 24, 1, 0, 0], mouse: { move: async () => {} },
     screencast: {
       async start(options) { requested = options.fps; await options.onFrame({ data, timestamp: Date.now(), viewportWidth: 32, viewportHeight: 24 }) },
@@ -105,37 +101,4 @@ test('30 FPS recordings keep the larger in-flight frame allowance', async () => 
     await fs.rm(directory, { recursive: true, force: true })
   }
   assert.equal(requested, 60)
-})
-
-test('caller cancellation interrupts graphics inspection without changing the caller browser', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout'] })
-  const started = Promise.withResolvers(), response = Promise.withResolvers()
-  const controller = new AbortController(), reason = new Error('stop caller graphics check')
-  const session = { send: () => { started.resolve(); return response.promise }, detach: t.mock.fn(async () => {}) }
-  const browser = { newBrowserCDPSession: async () => session, close: t.mock.fn() }
-  const page = {
-    context: () => ({ browser: () => browser }),
-    evaluate: async () => [32, 24, 1, 0, 0],
-    mouse: { move: t.mock.fn() }, screencast: { start: t.mock.fn() },
-  }
-  const flow = { initialPointer: { x: 0, y: 0 }, run: t.mock.fn() }
-  let failure
-  const pending = captureFlow({ directory: tmpdir(), page, signal: controller.signal,
-    config: { viewport: { width: 32, height: 24 } }, flow,
-  }).catch(error => { failure = error })
-  await started.promise
-  controller.abort(reason)
-  await nextTurn()
-  try {
-    assert.equal(failure, reason)
-    assert.equal(browser.close.mock.callCount(), 0)
-    assert.equal(session.detach.mock.callCount(), 1)
-    assert.equal(page.mouse.move.mock.callCount(), 0)
-    assert.equal(page.screencast.start.mock.callCount(), 0)
-    assert.equal(flow.run.mock.callCount(), 0)
-  } finally {
-    response.resolve({ gpu: {} })
-    t.mock.timers.tick(5000)
-    await pending
-  }
 })

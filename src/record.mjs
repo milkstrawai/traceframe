@@ -65,7 +65,7 @@ async function recordFlow({ config, flow, ffmpeg, signal, page }) {
       duration,
       moveCount: trace.moves.length,
       clickCount: trace.clicks.length,
-      graphics: capture.graphics,
+      ...(capture.graphics ? { graphics: capture.graphics } : {}),
       runDirectory: config.runDirectory,
       ...(audio ? { audio: true } : {}),
       ...(capture.captureStats ? { captureStats: capture.captureStats } : {}),

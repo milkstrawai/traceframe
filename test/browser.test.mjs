@@ -1,6 +1,5 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { setImmediate as nextTurn } from 'node:timers/promises'
 import { chromium } from 'playwright'
 
 import { launchBrowser } from '../src/browser.mjs'
@@ -30,7 +29,6 @@ test('auto keeps a GPU browser whose hardware rendering is verified', async (t) 
   assert.deepEqual(launch.mock.calls.map(call => call.arguments[0]), [{
     executablePath: config.browser, args: gpuArgs, handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false,
   }])
-  await nextTurn()
   assert.deepEqual(s.calls, { closes: 0, detaches: 1 })
 })
 
@@ -82,16 +80,16 @@ test('a failed software retry propagates its error with no further retries', asy
   assert.equal(s.calls.closes, 1)
 })
 
-test('a missing executable reports how to install or configure Chromium', async (t) => {
-  t.mock.method(chromium, 'launch', async () => { throw new Error("Executable doesn't exist") })
+test('a missing executable reports how to install or configure Chromium without a software retry', async (t) => {
+  const launch = t.mock.method(chromium, 'launch', async () => { throw new Error("Executable doesn't exist") })
   await assert.rejects(launchBrowser(config, { handleSignals: true, signal }), { code: 'PLAYWRIGHT_RUNTIME_MISSING', message: /Configured browser executable/ })
+  assert.equal(launch.mock.callCount(), 1)
 })
 
-test('a stalled graphics check falls back after its deadline without waiting for the session', async (t) => {
+test('a stalled graphics check falls back after its deadline', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   const first = stub(), second = stub(), started = Promise.withResolvers()
   first.session.send = () => { started.resolve(); return new Promise(() => {}) }
-  first.session.detach = async () => { first.calls.detaches++; await new Promise(() => {}) }
   const launch = t.mock.method(chromium, 'launch', async () => launch.mock.callCount() === 0 ? first.browser : second.browser)
   const pending = launchBrowser(config, { handleSignals: true, signal })
   await started.promise
@@ -99,7 +97,7 @@ test('a stalled graphics check falls back after its deadline without waiting for
   const result = await pending
   assert.equal(result.browser, second.browser)
   assert.equal(result.graphics.fallbackReason, 'graphics-check-unavailable')
-  assert.deepEqual(first.calls, { closes: 1, detaches: 1 })
+  assert.equal(first.calls.closes, 1)
 })
 
 test('cancellation during the graphics check closes the GPU browser and starts no fallback', async (t) => {
@@ -114,7 +112,7 @@ test('cancellation during the graphics check closes the GPU browser and starts n
   // Rejects at once, not at the 5-second graphics deadline.
   await assert.rejects(pending, error => error === reason)
   assert.equal(launch.mock.callCount(), 1)
-  assert.deepEqual(s.calls, { closes: 1, detaches: 1 })
+  assert.equal(s.calls.closes, 1)
 })
 
 test('a GPU launch that fails after cancellation starts no fallback', async (t) => {

@@ -7,7 +7,7 @@ import { addDiagnostics, retainedFile } from './diagnostics.mjs'
 import { createFlowApi } from './flow.mjs'
 import { createCaptureStats } from './capture-stats.mjs'
 import { createJpegCapture } from './jpeg-capture.mjs'
-import { launchBrowser, inspectGraphics } from './browser.mjs'
+import { launchBrowser } from './browser.mjs'
 import { raceAbort, withDeadline } from './deadline.mjs'
 
 const PLAYWRIGHT_DEFAULT_TIMEOUT = 30_000
@@ -26,9 +26,7 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
   const stats = config.captureDiagnostics ? createCaptureStats() : undefined
 
   signal.throwIfAborted()
-  const launched = page ? undefined : await launchBrowser(config, { handleSignals: !callerSignal, signal })
-  const browser = launched?.browser
-  let graphics = launched?.graphics
+  const { browser, graphics } = page ? {} : await launchBrowser(config, { handleSignals: !callerSignal, signal })
   let clock
   let recording = false
   let failed = false
@@ -45,7 +43,6 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
       await page.mouse.move(trace.initialPointer.x, trace.initialPointer.y)
     } else {
       await assertPageGeometry(page, config, signal)
-      graphics = await inspectGraphics(page.context().browser(), signal)
     }
 
     const firstFrame = Promise.withResolvers()

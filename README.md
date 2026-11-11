@@ -93,7 +93,7 @@ Traceframe does not change GPU drivers or permissions. On Linux, Chromium usuall
 
 On a Linux laptop with Intel and NVIDIA GPUs, auto mode can pick the Intel one; `graphics.renderer` names the GPU used. To use the faster NVIDIA GPU, install NVIDIA's EGL library if it is missing (on Ubuntu, for example `libnvidia-gl-580` for driver 580) and run Traceframe with `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json`.
 
-Video decoding stays in software, and JPEG capture and final MP4 encoding still use the CPU; GPU rendering is not hardware video encoding. Smoother capture can store more frames and increase temporary storage and export time. For `recordPage`, configure the caller's browser yourself; the result reports that browser's graphics, with `hardwareAccelerated: null` when the check was unavailable.
+Video decoding stays in software, and JPEG capture and final MP4 encoding still use the CPU; GPU rendering is not hardware video encoding. Smoother capture can store more frames and increase temporary storage and export time. For `recordPage`, configure and check the caller's browser yourself; its result has no `graphics`.
 
 GPU rendering matters most for video-heavy pages. In full-screen 4K60 video tests at 3024 × 1964, it recorded several times more distinct pictures per second than software rendering, but not 60: even with spare CPU, Chromium captured that video at about 45 pictures per second, and its screencast has no setting to raise this. On slower machines, video decoding and Chromium's JPEG capture compete for the CPU. Full Chromium, which extensions need, captured noticeably fewer pictures than the default headless shell on Linux, so use the default shell unless the flow needs extensions.
 
