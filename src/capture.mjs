@@ -13,6 +13,10 @@ import { raceAbort, withDeadline } from './deadline.mjs'
 const PLAYWRIGHT_DEFAULT_TIMEOUT = 30_000
 const FIRST_FRAME_TIMEOUT = 10_000
 const FAILURE_SCREENSHOT_TIMEOUT = 5_000
+// Playwright uses the screencast fps only to let Chromium have 10 frames in flight above 30,
+// otherwise 5. Export sets the output rate, so 30 FPS output keeps the larger allowance: with 5,
+// a busy machine captured fewer pictures without saving any work.
+const SCREENCAST_FPS = 60
 
 export async function captureFlow({ config, flow, directory, page, signal: callerSignal }) {
   const captureErrors = new AbortController()
@@ -48,7 +52,7 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
     signal.throwIfAborted()
     capture = createJpegCapture(rawPath, { ...config.video, onError: cause => captureErrors.abort(new TraceframeError(`Could not save capture: ${cause.message}`, { code: 'CAPTURE_FAILED', cause })) })
     let firstSize
-    await page.screencast.start({ size: { width: config.video.width, height: config.video.height }, fps: config.video.fps, quality: config.captureQuality, onFrame: (frame) => {
+    await page.screencast.start({ size: { width: config.video.width, height: config.video.height }, fps: SCREENCAST_FPS, quality: config.captureQuality, onFrame: (frame) => {
       stats?.observe(frame.timestamp, performance.now())
       firstFrame.resolve(frame)
       // The first frame is checked against the request below. A later size change would

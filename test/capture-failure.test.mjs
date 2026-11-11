@@ -85,6 +85,28 @@ test('a frame size change stops the recording at once instead of truncating the 
   }
 })
 
+test('30 FPS recordings keep the larger in-flight frame allowance', async () => {
+  // Playwright 1.64 uses fps only to let Chromium have 10 frames in flight above 30, otherwise 5.
+  const directory = await fs.mkdtemp(join(tmpdir(), 'traceframe-screencast-fps-'))
+  const data = Buffer.from('ffd8ffc00011080018002003012200021101031101ffd9', 'hex')
+  let requested
+  const page = {
+    context: () => ({ browser: () => undefined }),
+    evaluate: async () => [32, 24, 1, 0, 0], mouse: { move: async () => {} },
+    screencast: {
+      async start(options) { requested = options.fps; await options.onFrame({ data, timestamp: Date.now(), viewportWidth: 32, viewportHeight: 24 }) },
+      async stop() {},
+    },
+  }
+  try {
+    await captureFlow({ directory, page, flow: { initialPointer: { x: 0, y: 0 }, async run() {} },
+      config: { video: { width: 32, height: 24, fps: 30 }, viewport: { width: 32, height: 24 }, captureQuality: 85, flowTimeout: 5, postRoll: 0 } })
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true })
+  }
+  assert.equal(requested, 60)
+})
+
 test('caller cancellation interrupts graphics inspection without changing the caller browser', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   const started = Promise.withResolvers(), response = Promise.withResolvers()
