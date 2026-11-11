@@ -35,7 +35,6 @@ try {
     '--flow', join(examples, 'recipes-flow.mjs'),
     '--audio', audio, '--audio-offset', '0.5',
     '--capture-quality', '80', '--capture-diagnostics',
-    '--gpu', 'auto',
     '--run-dir', join(directory, 'capture ü'),
     '--out', join(directory, 'sample.mp4'),
   ], { cwd: directory })
@@ -44,7 +43,6 @@ try {
   assert.equal(summary.moveCount, 6)
   assert.equal(summary.audio, true)
   assert.ok(summary.captureStats.framesReceived > 0)
-  assert.equal(summary.graphics.requested, 'auto')
   assert.ok(summary.graphics.hardwareAccelerated === true || summary.graphics.fallbackReason)
   assert.ok(summary.captureStats.writeWaitMs >= summary.captureStats.maxWriteWaitMs)
   const audioStream = await run('ffprobe', ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', summary.output])

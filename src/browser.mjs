@@ -1,111 +1,74 @@
-import { addAbortListener } from 'node:events'
 import { chromium } from 'playwright'
 
 import { TraceframeError } from './errors.mjs'
+import { withDeadline } from './deadline.mjs'
+
+const GRAPHICS_CHECK_TIMEOUT = 5_000
 
 export async function launchBrowser(config, { handleSignals, signal }) {
-  const requested = config.gpu ?? 'default'
-  const backend = config.gpuBackend ?? (process.platform === 'linux' ? 'gl-egl' : 'default')
-  // The headless shell sizes DOM fullscreen from its window (800×600 pixels by default).
-  // Match the recording so a fullscreen page keeps the requested viewport.
   const baseArgs = [
     ...(config.scale === 2 ? ['--force-device-scale-factor=2'] : []),
+    // The headless shell sizes DOM fullscreen from its window (800×600 pixels by default).
+    // Match the recording so a fullscreen page keeps the requested viewport.
     `--window-size=${config.video.width},${config.video.height}`,
+    // Keep video decoding in software: hardware decoding fails in headless Linux and added no captured frames on macOS.
+    '--disable-accelerated-video-decode',
   ]
-  const softwareArgs = ['--disable-gpu', '--disable-accelerated-video-decode']
-  const gpuArgs = ['--enable-gpu', '--disable-accelerated-video-decode']
-  if (backend !== 'default') gpuArgs.push(`--use-angle=${backend}`)
-  if (process.platform === 'linux') gpuArgs.push('--ozone-platform=headless')
-
-  async function open(args) {
-    let browser
-    let cancellation
+  async function launch(args) {
+    signal.throwIfAborted()
     try {
-      signal?.throwIfAborted()
-      browser = await chromium.launch({
+      return await chromium.launch({
         executablePath: config.browser,
         args: [...baseArgs, ...args],
         handleSIGINT: handleSignals,
         handleSIGTERM: handleSignals,
         handleSIGHUP: handleSignals,
       })
-      if (signal) cancellation = addAbortListener(signal, () => { void browser.close().catch(() => {}) })
-      signal?.throwIfAborted()
-      const page = await browser.newPage({ viewport: config.viewport, deviceScaleFactor: config.scale, storageState: config.storageState })
-      const graphics = await inspectGraphics(browser, signal)
-      signal?.throwIfAborted()
-      return { browser, page, graphics: { requested, ...graphics } }
     } catch (error) {
-      await browser?.close().catch(() => {})
-      signal?.throwIfAborted()
       if (!/Executable doesn't exist/i.test(error.message)) throw error
       const message = config.browser
         ? `Configured browser executable is unavailable: ${config.browser}`
         : 'Playwright Chromium is not installed. Run `npx playwright@1.64.1 install --only-shell chromium`, or pass --browser to a Chrome executable.'
       throw new TraceframeError(message, { code: 'PLAYWRIGHT_RUNTIME_MISSING', cause: error })
-    } finally {
-      cancellation?.[Symbol.dispose]()
     }
   }
 
-  if (requested !== 'auto') return open(requested === 'off' ? softwareArgs : [])
+  const softwareArgs = ['--disable-gpu']
+  if (config.gpu === 'off') return { browser: await launch(softwareArgs), graphics: { hardwareAccelerated: false } }
 
-  let candidate
-  let fallbackReason
-  try {
-    candidate = await open(gpuArgs)
-    if (candidate.graphics.hardwareAccelerated === true) {
-      candidate.graphics.requestedBackend = backend
-      return candidate
-    }
-    fallbackReason = candidate.graphics.hardwareAccelerated === false ? 'software-rendering' : 'graphics-check-unavailable'
-  } catch (error) {
-    signal?.throwIfAborted()
-    if (error.code === 'PLAYWRIGHT_RUNTIME_MISSING') throw error
-    fallbackReason = 'gpu-launch-failed'
-  }
   // Decide before navigation or ready(): application preparation runs only once.
-  await candidate?.browser.close()
-  const result = await open(softwareArgs)
-  Object.assign(result.graphics, { requestedBackend: backend, fallbackReason })
-  return result
+  let fallbackReason = 'gpu-launch-failed'
+  const candidate = await launch(['--enable-gpu', ...(process.platform === 'linux' ? ['--use-angle=gl-egl'] : [])])
+    .catch(() => {})
+  if (candidate) {
+    const graphics = await inspectGraphics(candidate, signal)
+    if (graphics.hardwareAccelerated) return { browser: candidate, graphics }
+    await candidate.close()
+    fallbackReason = graphics.hardwareAccelerated === false ? 'software-rendering' : 'graphics-check-unavailable'
+  }
+  // A cancelled launch or check also lands here; launch() then rethrows the cancellation.
+  return { browser: await launch(softwareArgs), graphics: { hardwareAccelerated: false, fallbackReason } }
 }
 
+// Best effort: a failed, slow or cancelled check reports unknown graphics.
 export async function inspectGraphics(browser, signal) {
-  let sessionPromise
-  let timer
-  let cancellation
+  let session
   try {
-    signal?.throwIfAborted()
-    sessionPromise = browser.newBrowserCDPSession()
-    const request = async () => {
-      const session = await sessionPromise
-      signal?.throwIfAborted()
-      const { gpu } = await session.send('SystemInfo.getInfo')
-      const compositing = gpu.featureStatus?.gpu_compositing ?? null
-      const rasterization = gpu.featureStatus?.rasterization ?? null
-      const renderer = gpu.auxAttributes?.glRenderer ?? null
-      const software = /swiftshader|llvmpipe|softpipe|lavapipe|software|basic render|\bwarp\b/i.test(renderer ?? '')
-      return {
-        hardwareAccelerated: compositing === null || !renderer ? null : compositing.startsWith('enabled') && !software,
-        compositing,
-        rasterization,
-        renderer,
-      }
-    }
-    return await Promise.race([
-      request(),
-      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Graphics check timed out')), 5000) }),
-      ...(signal ? [new Promise((_, reject) => { cancellation = addAbortListener(signal, () => reject(signal.reason)) })] : []),
-    ])
+    const { gpu } = await withDeadline(async (deadline) => {
+      session = browser.newBrowserCDPSession()
+      const cdp = await session
+      deadline.throwIfAborted()
+      return cdp.send('SystemInfo.getInfo')
+    }, GRAPHICS_CHECK_TIMEOUT, new Error('Graphics check timed out.'), signal)
+    const compositing = gpu.featureStatus?.gpu_compositing
+    const renderer = gpu.auxAttributes?.glRenderer
+    if (!compositing || !renderer) return { hardwareAccelerated: null }
+    const software = /swiftshader|llvmpipe|softpipe|lavapipe|software|basic render|\bwarp\b/i.test(renderer)
+    return { hardwareAccelerated: compositing.startsWith('enabled') && !software, renderer }
   } catch {
-    signal?.throwIfAborted()
-    // Graphics metadata is best effort, including on caller-owned browsers.
-    return { hardwareAccelerated: null, compositing: null, rasterization: null, renderer: null }
+    return { hardwareAccelerated: null }
   } finally {
-    clearTimeout(timer)
-    cancellation?.[Symbol.dispose]()
-    // Do not let a stalled diagnostic session block recording or cancellation.
-    void sessionPromise?.then(session => session.detach()).catch(() => {})
+    // Do not wait for a stalled session, and detach one that arrives after the deadline.
+    void session?.then(cdp => cdp.detach()).catch(() => {})
   }
 }

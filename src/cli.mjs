@@ -16,7 +16,6 @@ const OPTION_KEYS = {
   preset: 'preset',
   browser: 'browser',
   gpu: 'gpu',
-  'gpu-backend': 'gpuBackend',
   'storage-state': 'storageState',
   'viewport-width': 'viewportWidth',
   'viewport-height': 'viewportHeight',
@@ -43,8 +42,7 @@ Options:
   --preset <standard|draft>    standard: 1280x800 CSS viewport, 2560x1600 at 60 FPS (default)
                                draft: 1280x800 CSS viewport, 1280x800 at 30 FPS
   --browser <path>             Chromium executable (or set CHROME_PATH)
-  --gpu <default|auto|off>      Browser defaults (default), verified GPU with fallback, or software
-  --gpu-backend <backend>      auto mode: default, gl-egl, or metal (Linux: gl-egl)
+  --gpu <auto|off>             Verified GPU with software fallback (default), or software only
   --storage-state <path>       Playwright storage state JSON
   --viewport-width <pixels>    CSS viewport width
   --viewport-height <pixels>   CSS viewport height

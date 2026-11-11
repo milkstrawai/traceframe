@@ -1,4 +1,3 @@
-import { addAbortListener } from 'node:events'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -9,6 +8,7 @@ import { createFlowApi } from './flow.mjs'
 import { createCaptureStats } from './capture-stats.mjs'
 import { createJpegCapture } from './jpeg-capture.mjs'
 import { launchBrowser, inspectGraphics } from './browser.mjs'
+import { raceAbort, withDeadline } from './deadline.mjs'
 
 const PLAYWRIGHT_DEFAULT_TIMEOUT = 30_000
 const FIRST_FRAME_TIMEOUT = 10_000
@@ -35,13 +35,13 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
   }
   try {
     if (browser) {
-      page = launched.page
+      page = await browser.newPage({ viewport: config.viewport, deviceScaleFactor: config.scale, storageState: config.storageState })
       await raceAbort(waitForReady(page, flow, config, signal), signal)
       signal.throwIfAborted()
       await page.mouse.move(trace.initialPointer.x, trace.initialPointer.y)
     } else {
       await assertPageGeometry(page, config, signal)
-      graphics = { requested: 'caller', ...await inspectGraphics(page.context().browser(), signal) }
+      graphics = await inspectGraphics(page.context().browser(), signal)
     }
 
     const firstFrame = Promise.withResolvers()
@@ -190,28 +190,5 @@ async function waitForReady(page, flow, config, signal) {
     page.setDefaultTimeout(PLAYWRIGHT_DEFAULT_TIMEOUT)
   } catch (error) {
     throw new TraceframeError(`Ready check failed: ${error instanceof Error ? error.message : error}`, { code: 'READY_FAILED', cause: error })
-  }
-}
-
-// Settles with the task, or rejects at the deadline or on abort, even if the task ignores its signal.
-async function withDeadline(task, milliseconds, error, signal) {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(error), milliseconds)
-  const deadline = AbortSignal.any([signal, controller.signal])
-  try {
-    deadline.throwIfAborted()
-    return await raceAbort(task(deadline), deadline)
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-async function raceAbort(promise, signal) {
-  const aborted = Promise.withResolvers()
-  const listener = addAbortListener(signal, () => aborted.reject(signal.reason))
-  try {
-    return await Promise.race([promise, aborted.promise])
-  } finally {
-    listener[Symbol.dispose]()
   }
 }
