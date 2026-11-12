@@ -36,7 +36,10 @@ export default async function ({ page, click, wait }) { flows++; await click(pag
     assert.equal(module.flows, 1)
     assert.equal(mock.mock.callCount(), 2)
     assert.ok(browsers.every(browser => !browser.isConnected()))
-    assert.deepEqual(summary.graphics, { hardwareAccelerated: false, fallbackReason: 'software-rendering' })
+    const { fallbackReason, ...graphics } = summary.graphics
+    assert.deepEqual(graphics, { hardwareAccelerated: false })
+    // On Linux, the reason also depends on whether this account can open a GPU device.
+    assert.ok(['software-rendering', 'gpu-device-unavailable'].includes(fallbackReason), fallbackReason)
     assert.equal(summary.clickCount, 1)
     assert.ok(summary.captureStats.framesReceived > 0)
     const probe = await exec('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'json', summary.output])

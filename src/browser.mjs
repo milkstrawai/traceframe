@@ -1,3 +1,4 @@
+import { access, constants, readdir } from 'node:fs/promises'
 import { chromium } from 'playwright'
 
 import { TraceframeError } from './errors.mjs'
@@ -62,9 +63,19 @@ async function inspectGraphics(browser, signal) {
     const compositing = gpu.featureStatus?.gpu_compositing
     const renderer = gpu.auxAttributes?.glRenderer
     if (!compositing || !renderer) return { fallbackReason: 'graphics-check-unavailable' }
-    if (!compositing.startsWith('enabled') || SOFTWARE_RENDERER.test(renderer)) return { fallbackReason: 'software-rendering' }
+    if (!compositing.startsWith('enabled') || SOFTWARE_RENDERER.test(renderer)) return { fallbackReason: await softwareReason() }
     return { renderer }
   } catch {
     return { fallbackReason: 'graphics-check-unavailable' }
   }
+}
+
+// Linux GPU rendering usually needs a /dev/dri/renderD* device that the account can open.
+async function softwareReason() {
+  if (process.platform !== 'linux') return 'software-rendering'
+  const names = await readdir('/dev/dri').catch(() => [])
+  for (const name of names.filter(name => name.startsWith('renderD'))) {
+    if (await access(`/dev/dri/${name}`, constants.R_OK | constants.W_OK).then(() => true, () => false)) return 'software-rendering'
+  }
+  return 'gpu-device-unavailable'
 }
