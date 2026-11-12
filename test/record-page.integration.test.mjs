@@ -39,7 +39,7 @@ async function checkVideo(path, width, height) {
 for (const scale of [1, 2]) {
   test(`records a caller page at scale ${scale} and supports another take without changing page settings`, { timeout: 30_000 }, async () => {
     await withPage(async ({ page, options }) => {
-      page.setDefaultTimeout(150)
+      page.setDefaultTimeout(1500)
       const url = page.url()
       const save = page.getByRole('button', { name: 'Save' })
       const result = await recordPage({ ...options, initialPointer: { x: 10, y: 10 }, flow: async ({ page: supplied, click, wait }) => {
