@@ -263,6 +263,14 @@ For an animated preview where an MP4 does not play inline, make a WebP. Not ever
 ffmpeg -i recording.mp4 -vf "fps=12,scale=1280:-1" -c:v libwebp_anim -quality 75 -loop 0 preview.webp
 ```
 
+For a smaller MP4 to share, re-encode a copy. Traceframe encodes at high quality, so a one-minute scrolling take at the default preset was 36 MB in tests. This command, which keeps any audio, made that take about 3 times smaller and an app demo about 2 times smaller. Text stayed sharp in still frames and became slightly softer while scrolling:
+
+```sh
+ffmpeg -i recording.mp4 -c:v libx264 -crf 28 -c:a copy -movflags +faststart smaller.mp4
+```
+
+Where the video will appear at half its size or smaller, replace `-crf 28` with `-vf "scale=trunc(iw/4)*2:-2" -crf 23` for a file about 5 to 7 times smaller. The filter halves both dimensions and keeps them even, as the encoder requires.
+
 ## Optional sharing
 
 With push access to a repository, current [GitHub CLI](https://docs.github.com/en/github-cli/github-cli/attaching-files-with-github-cli) can attach the MP4 to a comment so it plays there; check `gh pr comment --help` for your version. An MP4 hosted elsewhere shows as a link, not a player, so use the WebP preview there. Upload only when asked and after checking that the recording suits the destination; recording itself uploads nothing.
