@@ -37,7 +37,7 @@ For video assets you control, matching the source dimensions to the displayed ph
 If the video looks choppy:
 
 1. Apply any preparation above that suits the demonstration and make one more take at the same recording settings.
-2. For a browser Traceframe launches, check `graphics.hardwareAccelerated` in the result. If it is `false`, or `graphics.renderer` names a slower GPU than the machine has, see [GPU rendering](../README.md#gpu-rendering) for fixes; most change system settings, so ask the machine's owner first.
+2. For a browser Traceframe launches, check `graphics.hardwareAccelerated` in the result. If it is `false`, or `graphics.renderer` names a slower GPU than the machine has, see [GPU rendering](../README.md#gpu-rendering) for fixes; most change system settings, so ask the machine's owner first. After a failed GPU attempt, `graphics.fallbackReason` gives the reason: on Linux, for example, `gpu-device-unavailable` means no GPU device exists or the account cannot open one.
 3. If the video is still choppy, or nothing applies, keep the requested output dimensions, playback speed and source quality, finish the requested recording and report the limitation. Mention that a smaller scale usually helps most on a slower machine: `--scale 1` (`scale: 1` in the API) leaves Chromium a quarter of the pixels to capture, while a lower FPS does not reduce capture work.
 
 For optional diagnosis of playback without recording, let buffering and any extension processing warm up, then read the video's `getVideoPlaybackQuality()` counters before and after a representative segment with recording off, for example in `ready` or before `recordPage`. Page preparation can improve playback while capture remains expensive.
@@ -208,7 +208,7 @@ ffmpeg -ss 00:00:12.400 -i ./recording.mp4 \
   -frames:v 1 -update 1 .traceframe/review/take-1/detail-12.400.png
 ```
 
-Small text, focus rings and brief glitches can disappear in the reduced samples. Extract nearby frames around a suspicious transition and check caption reading pauses, pointer motion and result holds against the flow's timing. Contact sheets and successful decoding alone do not establish readable pacing or smooth motion. An agent preparing a demonstration should complete these checks before presenting it for the human's feature review.
+Small text, focus rings and brief glitches can disappear in the reduced samples. Extract nearby frames around a suspicious transition and check caption reading pauses, pointer motion and result holds against the flow's timing. Contact sheets and successful decoding alone do not establish readable pacing or smooth motion. An agent preparing a demonstration should complete these checks before presenting it for the human's feature review. A low `captureStats.receivedFps` does not by itself mean choppy motion: Chromium sends frames only when the page changes, so pauses between changes lower this average and raise `maxFrameGapMs`.
 
 ## Diagnose a failed take
 
