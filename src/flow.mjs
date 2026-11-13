@@ -103,7 +103,7 @@ export function createFlowApi({ page, trace, clock, viewport, signal }) {
       const element = await locator.elementHandle({ signal })
       handles.push(element)
       await element.waitForElementState('enabled', { signal }).catch((error) => {
-        throw error.name === 'TimeoutError' ? new TraceframeError(`${locator} stayed disabled.`, { code: 'FLOW_TARGET_DISABLED', cause: error }) : error
+        throw fromTimeout(error, `${locator} stayed disabled.`, 'FLOW_TARGET_DISABLED')
       })
       await assertReceivesPointer(element, locator, point, handles)
       const at = secondsSince(clock)
@@ -160,6 +160,11 @@ function durationSeconds(value, name, { allowZero = false } = {}) {
     throw new TraceframeError(`The ${name} must be ${range} ${LIMITS.maxActionDuration} seconds.`, { code: 'INVALID_FLOW' })
   }
   return value
+}
+
+// Playwright reports a wait that ran out of time as a TimeoutError; name what the flow was waiting for instead.
+function fromTimeout(error, message, code) {
+  return error?.name === 'TimeoutError' ? new TraceframeError(message, { code, cause: error }) : error
 }
 
 function assertBelowLimit(events, limit, type) {
@@ -240,14 +245,14 @@ async function scrollIntoView(element, locator, signal, handles) {
     }
     // The page may replace the target while it scrolls, or remove or hide it, as a menu that closes on scroll does.
     const target = await findTarget(locator, signal, handles).catch((error) => {
-      throw error.name === 'TimeoutError' ? new TraceframeError(`${locator} disappeared when it was scrolled into view.`, { code: 'FLOW_TARGET_MISSING', cause: error }) : error
+      throw fromTimeout(error, `${locator} disappeared when it was scrolled into view.`, 'FLOW_TARGET_MISSING')
     })
     await target.element.waitForElementState('stable', { signal })
     const box = await target.element.boundingBox()
     if (!box) throw new TraceframeError(`Could not find ${locator}.`, { code: 'FLOW_TARGET_MISSING' })
     return { element: target.element, box }
   } catch (error) {
-    throw error.name === 'TimeoutError' ? new TraceframeError(`${locator} kept moving after it was scrolled into view.`, { code: 'FLOW_TARGET_MOVED', cause: error }) : error
+    throw fromTimeout(error, `${locator} kept moving after it was scrolled into view.`, 'FLOW_TARGET_MOVED')
   }
 }
 
