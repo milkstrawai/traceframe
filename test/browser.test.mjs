@@ -119,6 +119,16 @@ test('a missing bundled Chromium gives the install command for the pinned Playwr
   })
 })
 
+test('the README and the recording guide quote the pinned Playwright version', async () => {
+  const { dependencies } = JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8'))
+  for (const file of ['README.md', 'docs/recording-flows.md']) {
+    // Both install commands (playwright@1.2.3) and prose (Playwright 1.2.3) count.
+    const quoted = [...(await fs.readFile(new URL(`../${file}`, import.meta.url), 'utf8')).matchAll(/playwright[@ ]v?(\d+\.\d+\.\d+)/gi)]
+    assert.ok(quoted.length, `${file} quotes no Playwright version`)
+    for (const [text, version] of quoted) assert.equal(version, dependencies.playwright, `${file}: ${text}`)
+  }
+})
+
 test('a stalled graphics check falls back after its deadline', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   const first = stub(), second = stub(), started = Promise.withResolvers()

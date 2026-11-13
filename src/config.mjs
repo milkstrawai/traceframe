@@ -96,6 +96,7 @@ function recordingConfig(options, viewport, defaults) {
   }
 }
 
+// The README and docs/recording-flows.md name these files.
 export function runFiles(directory) {
   return {
     capture: join(directory, 'capture.mkv'),

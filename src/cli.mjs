@@ -11,6 +11,7 @@ import { record } from './record.mjs'
 const { version: VERSION } = createRequire(import.meta.url)('../package.json')
 const SIGNAL_EXIT_CODES = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 }
 // Each flag and the record() option it sets. Flags without help are shown in the usage line.
+// A new flag also needs its check in config.mjs and an entry in the README.
 const OPTIONS = {
   url: { key: 'url' },
   flow: { key: 'flow' },
