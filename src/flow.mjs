@@ -1,6 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises'
 import { pathToFileURL } from 'node:url'
 
+import { easeOutCubic } from './easing.mjs'
 import { TraceframeError } from './errors.mjs'
 
 export const LIMITS = {
@@ -145,11 +146,6 @@ function insideViewport(point, viewport) {
 
 function secondsSince(clock) {
   return (Date.now() - clock) / 1000
-}
-
-// render.mjs draws the cursor along the same curve.
-function easeOutCubic(progress) {
-  return 1 - (1 - progress) ** 3
 }
 
 function durationSeconds(value, name, { allowZero = false } = {}) {

@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 import { runFiles } from './config.mjs'
+import { easeOutCubicExpression } from './easing.mjs'
 import { probeVideoDuration, runCommand } from './ffmpeg.mjs'
 import { TraceframeError } from './errors.mjs'
 
@@ -84,8 +85,7 @@ export function buildFilterScript({ trace, scale, fps = 60, audio, overlayEofAct
     const end = index + 1 < moves.length ? number(moves[index + 1].at) : undefined
     // Each window excludes its end, so the frame where one move hands over to the next does not draw the cursor twice.
     const enable = end === undefined ? `gte(t,${start})` : `gte(t,${start})*lt(t,${end})`
-    // The same curve as easeOutCubic in flow.mjs, so the drawn cursor follows the real pointer.
-    const eased = `(1-pow(1-clip((t-${start})/${number(move.duration)},0,1),3))`
+    const eased = easeOutCubicExpression(`clip((t-${start})/${number(move.duration)},0,1)`)
     const x = `${coordinate(move.from.x, CURSOR_HOTSPOT.x)}+${number((move.to.x - move.from.x) * scale)}*${eased}`
     const y = `${coordinate(move.from.y, CURSOR_HOTSPOT.y)}+${number((move.to.y - move.from.y) * scale)}*${eased}`
     filters.push(`[cursorVideo${index}][cursor${index + 1}]overlay=x='${x}':y='${y}':${overlay}:enable='${enable}'[cursorVideo${index + 1}]`)
