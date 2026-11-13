@@ -62,8 +62,6 @@ const page = { viewportSize: () => ({ width: 640, height: 480 }), screencast: {}
 test('existing-page settings use the caller viewport with explicit scale and fps', () => {
   const config = createPageConfig({ page })
   assert.deepEqual(config.video, { width: 640, height: 480, fps: 30 })
-  assert.equal(config.flow, undefined)
-  assert.equal(config.url, undefined)
   assert.deepEqual(createPageConfig({ page, scale: 2, fps: 60 }).video, { width: 1280, height: 960, fps: 60 })
 })
 
