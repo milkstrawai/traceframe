@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 
-import { createConfig, createPageConfig } from '../src/config.mjs'
+import { createAudioConfig, createConfig, createPageConfig } from '../src/config.mjs'
 
 const base = {
   flow: fileURLToPath(new URL('../examples/fixture-flow.mjs', import.meta.url)),
@@ -95,5 +95,12 @@ test('both recording paths normalize external audio with an explicit offset', ()
     for (const name of ['capture.mkv', 'capture.webm', 'render.filter', 'failure.png']) {
       assert.throws(() => configure({ runDirectory: 'take', audio: { path: `take/${name}` } }), /reserved recording file/)
     }
+  }
+})
+
+test('callback audio cannot use a reserved file in a relative temporary directory', () => {
+  // record() checks callback audio against its temporary directory, which is relative when TMPDIR is.
+  for (const name of ['capture.mkv', 'capture.webm', 'render.filter', 'failure.png']) {
+    assert.throws(() => createAudioConfig({ path: `traceframe-take/${name}` }, resolve('video.mp4'), 'traceframe-take'), /reserved recording file/)
   }
 })

@@ -1,4 +1,4 @@
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 
 import { TraceframeError } from './errors.mjs'
 
@@ -94,13 +94,24 @@ function recordingConfig(options, viewport, defaults) {
   }
 }
 
+export function runFiles(directory) {
+  return {
+    capture: join(directory, 'capture.mkv'),
+    filter: join(directory, 'render.filter'),
+    screenshot: join(directory, 'failure.png'),
+  }
+}
+
 export function createAudioConfig(audio, output, directory) {
   if (audio === undefined) return undefined
   check(typeof audio?.path === 'string' && audio.path.length > 0, 'Audio must specify a local file path (--audio <path>, or audio: { path }).')
   const path = resolve(audio.path)
   check(path !== output, 'Audio input and video output must use different paths.')
   if (directory) {
-    check(!['capture.mkv', 'capture.webm', 'render.filter', 'failure.png'].some((name) => path === resolve(directory, name)), `Audio input must not use a reserved recording file: ${path}`)
+    const root = resolve(directory)
+    // Releases before 0.6.0 saved the capture as capture.webm, and the README still lists it as reserved.
+    const reserved = [...Object.values(runFiles(root)), join(root, 'capture.webm')]
+    check(!reserved.includes(path), `Audio input must not use a reserved recording file: ${path}`)
   }
   const offset = audio.offset ?? DEFAULTS.audioOffset
   check(Number.isFinite(offset), 'Audio offset must be a finite number of seconds.')

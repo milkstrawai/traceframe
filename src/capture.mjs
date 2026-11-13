@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 
+import { runFiles } from './config.mjs'
 import { TraceframeError } from './errors.mjs'
 import { addDiagnostics, retainedFile } from './diagnostics.mjs'
 import { createFlowApi } from './flow.mjs'
@@ -21,7 +21,8 @@ const SCREENCAST_FPS = 60
 export async function captureFlow({ config, flow, directory, page, signal: callerSignal }) {
   const captureErrors = new AbortController()
   const signal = callerSignal ? AbortSignal.any([callerSignal, captureErrors.signal]) : captureErrors.signal
-  const rawPath = join(directory, 'capture.mkv')
+  const files = runFiles(directory)
+  const rawPath = files.capture
   const trace = { initialPointer: flow.initialPointer, moves: [], clicks: [] }
   const stats = config.captureDiagnostics ? createCaptureStats() : undefined
 
@@ -108,7 +109,7 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
         .then(() => clock !== undefined && config.runDirectory ? retainedFile(rawPath) : undefined)
         .catch(() => undefined),
       // A frame size change or a capture write error also aborts signal; only caller cancellation skips this.
-      config.runDirectory && page && !callerSignal?.aborted ? saveFailureScreenshot(page, directory, callerSignal) : undefined,
+      config.runDirectory && page && !callerSignal?.aborted ? saveFailureScreenshot(page, files.screenshot, callerSignal) : undefined,
     ])
     if (callerSignal?.aborted) throw callerSignal.reason
     throw await addDiagnostics(failure, { flow: config.flow, recordingTime, capturePath, screenshotPath })
@@ -172,12 +173,11 @@ function jpegSize(data) {
   }
 }
 
-async function saveFailureScreenshot(page, directory, signal) {
+async function saveFailureScreenshot(page, path, signal) {
   try {
     return await withDeadline(async (diagnosticSignal) => {
       const screenshot = await page.screenshot({ timeout: FAILURE_SCREENSHOT_TIMEOUT })
       diagnosticSignal.throwIfAborted()
-      const path = join(directory, 'failure.png')
       await writeFile(path, screenshot, { signal: diagnosticSignal })
       return path
     }, FAILURE_SCREENSHOT_TIMEOUT, new Error('Failure screenshot timed out.'), signal)

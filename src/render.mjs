@@ -2,6 +2,7 @@ import { rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
+import { runFiles } from './config.mjs'
 import { probeVideoDuration, runCommand } from './ffmpeg.mjs'
 import { TraceframeError } from './errors.mjs'
 
@@ -16,7 +17,7 @@ export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, s
   if (audio && audio.offset >= outputDuration) {
     throw new TraceframeError(`Audio offset ${audio.offset} seconds starts at or after the video's end (${number(outputDuration)} seconds). Reduce its offset.`, { code: 'AUDIO_OUTSIDE_VIDEO' })
   }
-  const filterPath = join(directory, 'render.filter')
+  const filterPath = runFiles(directory).filter
   await writeFile(filterPath, buildFilterScript({ trace, scale: config.scale, fps, audio, overlayEofAction: ffmpeg.overlayEofAction }))
   const outputTemp = join(dirname(config.output), `.traceframe-${randomUUID()}.tmp.mp4`)
   const args = [
