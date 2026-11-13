@@ -135,24 +135,24 @@ async function assertPageGeometry(page, config, signal) {
   }
 }
 
-// [JPEG width, JPEG height, viewport width, viewport height]; the JPEG values are undefined if unreadable.
+// The JPEG width and height are undefined if the JPEG is unreadable.
 function frameSize(frame) {
   const jpeg = jpegSize(frame.data)
-  return [jpeg?.width, jpeg?.height, frame.viewportWidth, frame.viewportHeight]
+  return { width: jpeg?.width, height: jpeg?.height, viewportWidth: frame.viewportWidth, viewportHeight: frame.viewportHeight }
 }
 
 function sameSize(a, b) {
-  return a.every((value, index) => value === b[index])
+  return a.width === b.width && a.height === b.height && a.viewportWidth === b.viewportWidth && a.viewportHeight === b.viewportHeight
 }
 
-function describeSize([width, height, viewportWidth, viewportHeight]) {
+function describeSize({ width, height, viewportWidth, viewportHeight }) {
   return `${width === undefined ? 'an unreadable JPEG' : `${width}×${height}`} for a ${viewportWidth}×${viewportHeight} viewport`
 }
 
 function assertFrameSize(frame, config) {
   // Check the exported JPEG dimensions; deviceScaleFactor alone is insufficient.
   const size = frameSize(frame)
-  const expected = [config.video.width, config.video.height, config.viewport.width, config.viewport.height]
+  const expected = { width: config.video.width, height: config.video.height, viewportWidth: config.viewport.width, viewportHeight: config.viewport.height }
   if (!sameSize(size, expected)) {
     const scaleHint = config.scale === 2 ? ' For scale 2, launch Chromium with --force-device-scale-factor=2; deviceScaleFactor alone is insufficient.' : ''
     throw new TraceframeError(`Screencast frames are ${describeSize(size)}; expected ${describeSize(expected)}. Keep the viewport fixed and use the page exclusively for this recording.${scaleHint}`, { code: 'CAPTURE_SIZE_MISMATCH' })
