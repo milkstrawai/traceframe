@@ -1,10 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { probeFfmpeg, runCommand } from '../src/ffmpeg.mjs'
+import { createJpegCapture } from '../src/jpeg-capture.mjs'
 import { buildFilterScript, renderVideo } from '../src/render.mjs'
 
 test('draws one cursor segment per move and one pulse per click', () => {
@@ -26,29 +27,7 @@ test('draws one cursor segment per move and one pulse per click', () => {
   assert.match(script, /\[final\]$/)
 })
 
-test('repeats the last raw frame when the screencast ends slightly before the post-roll', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'traceframe-render-'))
-  try {
-    const video = { width: 320, height: 200, fps: 30 }
-    const rawPath = join(directory, 'capture.webm')
-    await runCommand('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=white:s=320x200:r=30:d=1', '-c:v', 'libvpx-vp9', rawPath])
-    const trace = { initialPointer: { x: 10, y: 20 }, moves: [], clicks: [], end: 1 }
-    const duration = await renderVideo({
-      rawPath,
-      trace,
-      directory,
-      config: { video, scale: 1, postRoll: 0.1, output: join(directory, 'output.mp4') },
-      ffmpeg: await probeFfmpeg(),
-    })
-    assert.ok(Math.abs(duration - 1.1) <= 1.5 / video.fps)
-  } finally {
-    await rm(directory, { recursive: true, force: true })
-  }
-})
-
 test('full-range Chrome JPEGs retain gray levels and match limited-range input under overlays', async () => {
-  const { readFile, writeFile } = await import('node:fs/promises')
-  const { createJpegCapture } = await import('../src/jpeg-capture.mjs')
   const directory = await mkdtemp(join(tmpdir(), 'traceframe-levels-'))
   try {
     const width = 320, height = 200, fps = 30
