@@ -1,9 +1,11 @@
 import { access, constants, readdir } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { chromium } from 'playwright'
 
 import { TraceframeError } from './errors.mjs'
 import { withDeadline } from './deadline.mjs'
 
+const { version: PLAYWRIGHT_VERSION } = createRequire(import.meta.url)('playwright/package.json')
 const GRAPHICS_CHECK_TIMEOUT = 5_000
 const SOFTWARE_RENDERER = /swiftshader|llvmpipe|softpipe|lavapipe|software|basic render|\bwarp\b/i
 
@@ -29,7 +31,7 @@ export async function launchBrowser(config, { handleSignals, signal }) {
       if (!/Executable doesn't exist/i.test(error.message)) throw error
       const message = config.browser
         ? `Configured browser executable is unavailable: ${config.browser}`
-        : 'Playwright Chromium is not installed. Run `npx playwright@1.64.1 install --only-shell chromium`, or pass --browser to a Chrome executable.'
+        : `Playwright Chromium is not installed. Run \`npx playwright@${PLAYWRIGHT_VERSION} install --only-shell chromium\`, or pass --browser to a Chrome executable.`
       throw new TraceframeError(message, { code: 'PLAYWRIGHT_RUNTIME_MISSING', cause: error })
     }
   }
