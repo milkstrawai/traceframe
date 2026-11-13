@@ -65,7 +65,7 @@ test('CLI still reports flow context without --run-dir and does not claim saved 
     assert.match(result.stderr, /^traceframe: \[FLOW_FAILED\] flow problem/)
     assert.ok(result.stderr.includes(`  Flow: ${flow}:1:`))
     assert.match(result.stderr, /Recording time:/)
-    assert.doesNotMatch(result.stderr, /Capture:|Screenshot:|capture\.webm|failure\.png/)
+    assert.doesNotMatch(result.stderr, /Capture:|Screenshot:|capture\.mkv|failure\.png/)
     assert.deepEqual((await readdir(directory)).sort(), ['flow.mjs', 'page.html'])
   })
 })
