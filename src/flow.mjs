@@ -36,6 +36,10 @@ export function createFlow(run, viewport, initialPointer) {
 }
 
 // Events are timed in seconds from `clock`, the epoch milliseconds of the first video frame.
+export function secondsSince(clock) {
+  return (Date.now() - clock) / 1000
+}
+
 export function createFlowApi({ page, trace, clock, viewport, signal }) {
   let pointer = trace.initialPointer
   const sleep = (milliseconds) => delay(milliseconds, undefined, { signal })
@@ -142,10 +146,6 @@ function withHandles(run) {
 
 function insideViewport(point, viewport) {
   return point?.x >= 0 && point?.y >= 0 && point.x <= viewport.width && point.y <= viewport.height
-}
-
-function secondsSince(clock) {
-  return (Date.now() - clock) / 1000
 }
 
 function durationSeconds(value, name, { allowZero = false } = {}) {

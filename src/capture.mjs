@@ -4,7 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { runFiles } from './config.mjs'
 import { TraceframeError } from './errors.mjs'
 import { addDiagnostics, retainedFile } from './diagnostics.mjs'
-import { createFlowApi } from './flow.mjs'
+import { createFlowApi, secondsSince } from './flow.mjs'
 import { createCaptureStats } from './capture-stats.mjs'
 import { createJpegCapture } from './jpeg-capture.mjs'
 import { launchBrowser } from './browser.mjs'
@@ -91,7 +91,7 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
       if (signal.aborted || error instanceof TraceframeError) throw error
       throw new TraceframeError(error instanceof Error ? error.message : String(error), { code: 'FLOW_FAILED', cause: error })
     }
-    trace.end = (Date.now() - clock) / 1000
+    trace.end = secondsSince(clock)
     await delay(config.postRoll * 1000, undefined, { signal })
     // Stop the page subscription only once, including when shutdown fails.
     recording = false
@@ -101,7 +101,7 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
     failed = true
     // A writer failure during cleanup must not replace the initiating failure.
     const failure = signal.aborted ? signal.reason : error
-    const recordingTime = clock === undefined ? undefined : Math.max(0, (Date.now() - clock) / 1000)
+    const recordingTime = clock === undefined ? undefined : Math.max(0, secondsSince(clock))
     // Flush captured frames before closing the browser, including on slower disks.
     const [capturePath, screenshotPath] = await Promise.all([
       (recording ? stopCapture().catch(() => {}) : Promise.resolve())
