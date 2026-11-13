@@ -37,6 +37,16 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
     const stoppedAt = Date.now()
     try { await page.screencast.stop() } finally { await capture?.stop(stoppedAt) }
   }
+  // After a failure, flush the frames captured so far before the browser closes, including on slower disks.
+  async function savePartialCapture() {
+    try {
+      if (recording) await stopCapture().catch(() => {})
+      await capture?.stop()
+      return clock !== undefined && config.runDirectory ? await retainedFile(rawPath) : undefined
+    } catch {
+      return undefined
+    }
+  }
   try {
     if (browser) {
       // A browser launch cannot be interrupted, so check before creating the page and again before navigation.
@@ -103,12 +113,8 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
     // A writer failure during cleanup must not replace the initiating failure.
     const failure = signal.aborted ? signal.reason : error
     const recordingTime = clock === undefined ? undefined : Math.max(0, secondsSince(clock))
-    // Flush captured frames before closing the browser, including on slower disks.
     const [capturePath, screenshotPath] = await Promise.all([
-      (recording ? stopCapture().catch(() => {}) : Promise.resolve())
-        .then(() => capture?.stop())
-        .then(() => clock !== undefined && config.runDirectory ? retainedFile(rawPath) : undefined)
-        .catch(() => undefined),
+      savePartialCapture(),
       // A frame size change or a capture write error also aborts signal; only caller cancellation skips this.
       config.runDirectory && page && !callerSignal?.aborted ? saveFailureScreenshot(page, files.screenshot, callerSignal) : undefined,
     ])
