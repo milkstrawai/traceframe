@@ -12,6 +12,7 @@ import { raceAbort, withDeadline } from './deadline.mjs'
 
 const PLAYWRIGHT_DEFAULT_TIMEOUT = 30_000
 const FIRST_FRAME_TIMEOUT = 10_000
+const GEOMETRY_CHECK_TIMEOUT = 10_000
 const FAILURE_SCREENSHOT_TIMEOUT = 5_000
 // Playwright uses the screencast fps only to let Chromium have 10 frames in flight above 30,
 // otherwise 5. Export sets the output rate, so 30 FPS output keeps the larger allowance: with 5,
@@ -126,8 +127,8 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
 async function assertPageGeometry(page, config, signal) {
   const [width, height, scale, left, top] = await withDeadline(
     () => page.evaluate(() => [innerWidth, innerHeight, visualViewport.scale, visualViewport.offsetLeft, visualViewport.offsetTop]),
-    FIRST_FRAME_TIMEOUT,
-    new TraceframeError(`Could not verify page geometry within ${FIRST_FRAME_TIMEOUT / 1000} seconds. Make sure the page is responsive.`, { code: 'CAPTURE_SIZE_MISMATCH' }),
+    GEOMETRY_CHECK_TIMEOUT,
+    new TraceframeError(`Could not verify page geometry within ${GEOMETRY_CHECK_TIMEOUT / 1000} seconds. Make sure the page is responsive.`, { code: 'CAPTURE_SIZE_MISMATCH' }),
     signal,
   )
   if (width !== config.viewport.width || height !== config.viewport.height || scale !== 1 || left !== 0 || top !== 0) {
