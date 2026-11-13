@@ -110,6 +110,15 @@ test('a missing executable reports how to install or configure Chromium without 
   assert.equal(launch.mock.callCount(), 1)
 })
 
+test('a missing bundled Chromium gives the install command for the pinned Playwright version', async (t) => {
+  const { dependencies } = JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8'))
+  t.mock.method(chromium, 'launch', async () => { throw new Error("Executable doesn't exist") })
+  await assert.rejects(launchBrowser({ ...config, browser: undefined }, { handleSignals: true, signal }), {
+    code: 'PLAYWRIGHT_RUNTIME_MISSING',
+    message: `Playwright Chromium is not installed. Run \`npx playwright@${dependencies.playwright} install --only-shell chromium\`, or pass --browser to a Chrome executable.`,
+  })
+})
+
 test('a stalled graphics check falls back after its deadline', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] })
   const first = stub(), second = stub(), started = Promise.withResolvers()
