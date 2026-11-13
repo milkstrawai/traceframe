@@ -14,7 +14,7 @@ const SIGNAL_EXIT_CODES = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 }
 const OPTIONS = {
   url: { key: 'url' },
   flow: { key: 'flow' },
-  out: { key: 'output' },
+  out: { key: 'output', value: '<path>', help: `Output MP4 (default: ${DEFAULTS.output})` },
   preset: { key: 'preset', value: `<${Object.keys(PRESETS).join('|')}>`, help: Object.keys(PRESETS).map(describePreset) },
   browser: { key: 'browser', value: '<path>', help: 'Chromium executable (or set CHROME_PATH)' },
   gpu: { key: 'gpu', value: '<auto|off>', help: 'Verified GPU with software fallback (default), or software only' },

@@ -55,7 +55,7 @@ npx @milkstraw/traceframe record \
 
 The [recording guide](docs/recording-flows.md) includes a runnable example and recipes for authentication, form input, asynchronous results, captions, browser settings, and inspecting, editing or sharing a recording.
 
-Both presets use a 1280×800 CSS viewport. `draft` produces 1280×800 at 30 FPS; `standard` (the default) produces 2560×1600 at 60 FPS. The output dimensions are the viewport times `--scale`, so `--preset draft --scale 2` gives 2560×1600 at 30 FPS. The command prints a JSON summary when it finishes.
+Both presets use a 1280×800 CSS viewport. `draft` produces 1280×800 at 30 FPS; `standard` (the default) produces 2560×1600 at 60 FPS. The output dimensions are the viewport times `--scale`, so `--preset draft --scale 2` gives 2560×1600 at 30 FPS. Without `--out`, the video is saved as `traceframe.mp4` in the current directory. The command prints a JSON summary when it finishes.
 
 For capture quality, slower machines, GPU rendering and temporary storage, see [capture quality and performance](#capture-quality-and-performance).
 
