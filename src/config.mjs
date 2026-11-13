@@ -16,6 +16,8 @@ export const DEFAULTS = {
   output: 'traceframe.mp4',
   audioOffset: 0,
 }
+// Browser and page setup that only record() does. recordPage() callers set up their own page, so it rejects these.
+const LAUNCH_OPTIONS = ['url', 'browser', 'gpu', 'storageState', 'readyTimeout', 'viewportWidth', 'viewportHeight', 'preset']
 
 export function createConfig(options = {}) {
   const presetName = options.preset ?? DEFAULTS.preset
@@ -50,7 +52,7 @@ export function createPageConfig(options = {}) {
   check(!page.isClosed(), 'The supplied page is closed.')
   const viewport = page.viewportSize()
   check(viewport, 'recordPage requires a fixed viewport. Set it when creating the page or context; viewport: null is not supported.')
-  for (const key of ['url', 'browser', 'gpu', 'storageState', 'readyTimeout', 'viewportWidth', 'viewportHeight', 'preset']) {
+  for (const key of LAUNCH_OPTIONS) {
     check(options[key] === undefined, `recordPage does not accept ${key}; prepare the page before recording and use scale/fps for video settings.`)
   }
   return recordingConfig(options, viewport, { scale: 1, fps: 30 })
