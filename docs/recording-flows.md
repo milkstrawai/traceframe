@@ -24,23 +24,7 @@ Put setup and page readiness in `ready({ page, signal })`. This runs after initi
 
 If your script already owns the page or an extension context, use [`recordPage`](../README.md#record-a-page-you-already-opened) with an inline callback. Prepare the page before calling it; the caller owns navigation and browser cleanup.
 
-### Check video playback
-
-For a video-heavy journey, check playback in your first take at the final recording settings; a separate check before recording is not needed. Record that take with `--capture-diagnostics` (`captureDiagnostics: true` in the API) and [inspect the saved motion](#record-inspect-and-refine) of its video segment. Capture diagnostics count delivered frames, which can contain repeated pictures; a final MP4 reporting 60 FPS does not establish 60 distinct captured images per second, and a 30 FPS source cannot provide 60 distinct video frames per second. If the video looks smooth, later takes need no new playback check until the browser, recording settings or workload changes.
-
-On YouTube, the player's **Settings (gear) → Ambient mode → Off** can reduce expensive background drawing during CPU-only playback. Ambient mode is available only with YouTube's dark theme; check the setting under the theme you will record. Disable this decorative effect only when it is unnecessary for the demonstration, and verify the setting before the take. Use the site's setting in `ready`, or prepare the caller-owned page before `recordPage`; Traceframe does not change it automatically.
-
-If the journey enters fullscreen, wait for the fullscreen layout, not only for `document.fullscreenElement`. On a slower test machine, YouTube sometimes reported fullscreen while keeping its normal page layout. Check that the video's bounding box reaches the viewport's width or height; if it does not within a few seconds, exit fullscreen and enter it again. One retry fixed every such case in those tests.
-
-For video assets you control, matching the source dimensions to the displayed physical pixels can avoid costly browser resizing during CPU-only playback. Physical dimensions include device scale: a video displayed 1512 CSS pixels wide at scale 2 occupies 3024 physical pixels. Preparing another asset can change image quality, so compare it with the original and preserve the intended framing. Do not silently replace third-party media, crop content or lower the required output resolution to claim a performance improvement.
-
-If the video looks choppy:
-
-1. Apply any preparation above that suits the demonstration and make one more take at the same recording settings.
-2. For a browser Traceframe launches, check `graphics.hardwareAccelerated` in the result. If it is `false`, or `graphics.renderer` names a slower GPU than the machine has, see [GPU rendering](../README.md#gpu-rendering) for fixes; most change system settings, so ask the machine's owner first. After a failed GPU attempt, `graphics.fallbackReason` gives the reason: on Linux, for example, `gpu-device-unavailable` means no GPU device exists or the account cannot open one.
-3. If the video is still choppy, or nothing applies, keep the requested output dimensions, playback speed and source quality, finish the requested recording and report the limitation. Mention that a smaller scale usually helps most on a slower machine: `--scale 1` (`scale: 1` in the API) leaves Chromium a quarter of the pixels to capture, while a lower FPS does not reduce capture work.
-
-For optional diagnosis of playback without recording, let buffering and any extension processing warm up, then read the video's `getVideoPlaybackQuality()` counters before and after a representative segment with recording off, for example in `ready` or before `recordPage`. Page preparation can improve playback while capture remains expensive.
+For a journey that plays video, also see [checking video playback](#check-video-playback).
 
 ## Save and switch login state
 
@@ -210,6 +194,24 @@ ffmpeg -ss 00:00:12.400 -i ./recording.mp4 \
 
 Small text, focus rings and brief glitches can disappear in the reduced samples. Extract nearby frames around a suspicious transition and check caption reading pauses, pointer motion and result holds against the flow's timing. Contact sheets and successful decoding alone do not establish readable pacing or smooth motion. An agent preparing a demonstration should complete these checks before presenting it for the human's feature review. A low `captureStats.receivedFps` does not by itself mean choppy motion: Chromium sends frames only when the page changes, so pauses between changes lower this average and raise `maxFrameGapMs`.
 
+## Check video playback
+
+For a video-heavy journey, check playback in your first take at the final recording settings; a separate check before recording is not needed. Record that take with `--capture-diagnostics` (`captureDiagnostics: true` in the API) and [inspect the saved motion](#record-inspect-and-refine) of its video segment. Capture diagnostics count delivered frames, which can contain repeated pictures; a final MP4 reporting 60 FPS does not establish 60 distinct captured images per second, and a 30 FPS source cannot provide 60 distinct video frames per second. If the video looks smooth, later takes need no new playback check until the browser, recording settings or workload changes.
+
+On YouTube, the player's **Settings (gear) → Ambient mode → Off** can reduce expensive background drawing during CPU-only playback. Ambient mode is available only with YouTube's dark theme; check the setting under the theme you will record. Disable this decorative effect only when it is unnecessary for the demonstration, and verify the setting before the take. Use the site's setting in `ready`, or prepare the caller-owned page before `recordPage`; Traceframe does not change it automatically.
+
+If the journey enters fullscreen, wait for the fullscreen layout, not only for `document.fullscreenElement`. On a slower test machine, YouTube sometimes reported fullscreen while keeping its normal page layout. Check that the video's bounding box reaches the viewport's width or height; if it does not within a few seconds, exit fullscreen and enter it again. One retry fixed every such case in those tests.
+
+For video assets you control, matching the source dimensions to the displayed physical pixels can avoid costly browser resizing during CPU-only playback. Physical dimensions include device scale: a video displayed 1512 CSS pixels wide at scale 2 occupies 3024 physical pixels. Preparing another asset can change image quality, so compare it with the original and preserve the intended framing. Do not silently replace third-party media, crop content or lower the required output resolution to claim a performance improvement.
+
+If the video looks choppy:
+
+1. Apply any preparation above that suits the demonstration and make one more take at the same recording settings.
+2. For a browser Traceframe launches, check `graphics.hardwareAccelerated` in the result. If it is `false`, or `graphics.renderer` names a slower GPU than the machine has, see [GPU rendering](../README.md#gpu-rendering) for fixes; most change system settings, so ask the machine's owner first. After a failed GPU attempt, `graphics.fallbackReason` gives the reason: on Linux, for example, `gpu-device-unavailable` means no GPU device exists or the account cannot open one.
+3. If the video is still choppy, or nothing applies, keep the requested output dimensions, playback speed and source quality, finish the requested recording and report the limitation. Mention that a smaller scale usually helps most on a slower machine: `--scale 1` (`scale: 1` in the API) leaves Chromium a quarter of the pixels to capture, while a lower FPS does not reduce capture work.
+
+For optional diagnosis of playback without recording, let buffering and any extension processing warm up, then read the video's `getVideoPlaybackQuality()` counters before and after a representative segment with recording off, for example in `ready` or before `recordPage`. Page preparation can improve playback while capture remains expensive.
+
 ## Diagnose a failed take
 
 The CLI keeps the original error message and adds available context on standard error. For example:
@@ -249,9 +251,9 @@ export default async function ({ page, click, wait }) {
 }
 ```
 
-Log to `console.error`, because Traceframe prints its JSON summary on standard output. This command plays seconds 2 to 9 at 4× speed. Set `fps` to the video's frame rate: 60 for the default preset, 30 for draft.
+Log to `console.error`, because Traceframe prints its JSON summary on standard output.
 
-This command drops the audio track. To keep audio synchronized, apply the same cuts and speed changes to its timeline, including when speeding up silent intervals.
+This command plays seconds 2 to 9 at 4× speed. Set `fps` to the video's frame rate: 60 for the default preset, 30 for draft. It drops the audio track; to keep audio synchronized, apply the same cuts and speed changes to its timeline, including when speeding up silent intervals.
 
 ```sh
 ffmpeg -i recording.mp4 -filter_complex "[0:v]trim=0:2,setpts=PTS-STARTPTS[a];[0:v]trim=2:9,setpts=(PTS-STARTPTS)/4[b];[0:v]trim=9,setpts=PTS-STARTPTS[c];[a][b][c]concat=n=3,fps=60[v]" -map "[v]" -c:v libx264 -crf 18 -movflags +faststart faster.mp4
