@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -118,8 +119,10 @@ test('aborting during a ready hook that ignores the signal stops and removes tem
   })
 })
 
-test('aborting during the render stops FFmpeg and removes temporary files', { timeout: 120_000 }, async () => {
+test('aborting during the render stops FFmpeg, removes temporary files and keeps the previous output', { timeout: 120_000 }, async (t) => {
   await withRecording(`export default async ({ page, hover, wait }) => { await hover(page.getByRole('button'), { duration: 0.5 }); await wait(4) }\n`, async ({ options, temp, outputDirectory }) => {
+    await writeFile(options.output, 'previous output')
+    const kill = t.mock.method(ChildProcess.prototype, 'kill')
     const controller = new AbortController()
     const reason = new Error('stop')
     const watcher = setInterval(async () => {
@@ -133,9 +136,11 @@ test('aborting during the render stops FFmpeg and removes temporary files', { ti
     }
 
     assert.ok(controller.signal.aborted)
+    // On Windows, runCommand stops FFmpeg with taskkill instead; ffmpeg.test.mjs covers that path.
+    if (process.platform !== 'win32') assert.ok(kill.mock.calls.some((call) => call.this.spawnargs[0] === 'ffmpeg'), 'FFmpeg kept running after the abort')
     assert.deepEqual(await readdir(temp), [])
-    assert.deepEqual(await readdir(outputDirectory), [])
-    assert.equal(existsSync(options.output), false)
+    assert.deepEqual(await readdir(outputDirectory), ['video.mp4'])
+    assert.equal(await readFile(options.output, 'utf8'), 'previous output')
   })
 })
 
