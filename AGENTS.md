@@ -1,3 +1,22 @@
+# Repository
+
+- Traceframe is an ES module package for Node.js 22+ with one dependency, Playwright, pinned to an exact version. `src/cli.mjs` is the command; `src/index.mjs` exports `record`, `recordPage` and `TraceframeError`.
+- `README.md` is also the npm page. `docs/recording-flows.md` and three files in `examples/` ship in the package, and agents follow the guide while they record. Update both when behavior changes.
+- Keep the published behavior stable: CLI commands, flags and exit codes, the exports, error codes, the fields of the result JSON, the rendered video and the package's file list. Describe any change to them in the commit message.
+- After editing an SVG in `src/assets`, run `npm run build:assets` to rebuild its PNGs.
+
+# Tests
+
+- Tests need Playwright's Chromium for the pinned version (`npx playwright@<version> install --only-shell chromium`) and FFmpeg 5 or newer with `ffprobe`, `libx264`, AAC, and the `libvpx-vp9` and `libopus` encoders that some tests use to make fixtures.
+- `npm test` runs every `test/*.test.mjs` file. Files named `*.integration.test.mjs` launch Chromium, and the whole suite takes a couple of minutes. For a quick check, run one file: `cd test && node --test <file>`.
+- `npm run test:smoke` records the fixture flow (`TRACEFRAME_PRESET=standard` for the default preset), and `npm run test:package` installs the packed package and records with it. CI runs all three on Linux, macOS and Windows.
+- Timing-sensitive tests can fail on a busy machine. Rerun a failed file on its own before treating the failure as real.
+
+# Commits
+
+- Write subjects as `type: summary`, with types such as `feat`, `fix`, `perf`, `docs`, `test`, `refactor` and `build`. In the body, explain in plain language why the change is needed and how it was checked.
+- The release steps are in the README's Development section.
+
 # Git and privacy
 
 - Commit, push, open PRs, merge, tag releases, or publish packages only when the user explicitly requests that action. Authorization already given for the task remains valid.
