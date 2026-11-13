@@ -16,7 +16,7 @@ test('draws one cursor segment per move and one pulse per click', () => {
     trace.clicks.push({ at: index + 0.75, point: to })
     from = to
   }
-  const script = buildFilterScript({ trace, scale: 1 })
+  const script = buildFilterScript({ trace, scale: 1, fps: 60, overlayEofAction: 'pass' })
   assert.match(script, /split=4\[cursor0\]\[cursor1\]\[cursor2\]\[cursor3\]/)
   assert.match(script, /\[2:v\]format=rgba,split=3\[pulse0\]\[pulse1\]\[pulse2\]/)
   assert.deepEqual(script.match(/\[click\d+\]overlay/g), ['[click0]overlay', '[click1]overlay', '[click2]overlay'])
