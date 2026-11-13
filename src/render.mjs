@@ -62,13 +62,13 @@ export function buildFilterScript({ trace, scale, fps, audio, overlayEofAction }
   const { clicks, moves } = trace
   const input = inputIndices(trace, audio)
   const animatedOverlays = clicks.length > 0 || moves.length > 0
+  // Repeat the last picture and resample to the output rate. The padding also covers a sub-frame take or final rounding.
+  // Animated overlays need every output tick, even on a static page, so the cadence comes first. With stationary
+  // overlays, it comes last, so they are composited before identical frames are duplicated.
   const cadence = `tpad=stop_mode=clone:stop_duration=1,fps=${fps}`
   // Pass mode avoids waiting on looping image inputs; FFmpeg 7 needs repeat for padding.
   // yuv444 places overlays on whole pixels rather than snapping them to even pixels.
   const overlay = `eof_action=${overlayEofAction}:format=yuv444`
-  // Animated overlays need every output tick, even on a static page.
-  // With stationary overlays, composite before duplicating identical frames.
-  // Padding also covers a sub-frame take or final rounding.
   // Chrome JPEGs are full range; normalize before compositing limited-range overlays.
   // Convert to the overlay format before duplicating frames. Converting afterward
   // can queue a full-size buffer for every repeated frame in a long static gap.
