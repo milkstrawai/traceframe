@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { easeOutCubic } from '../src/easing.mjs'
 import { createJpegCapture } from '../src/jpeg-capture.mjs'
 import { probeFfmpeg, runCommand } from '../src/ffmpeg.mjs'
 import { buildFilterScript, renderVideo } from '../src/render.mjs'
@@ -106,8 +107,9 @@ test('a sparse static capture still renders a smoothly moving cursor at 60 FPS',
     await capture.append({ data: await readFile(image), timestamp: 1000 })
     await capture.stop(2200)
     const initialPointer = { x: 20, y: 60 }
+    const move = { at: 0.1, duration: 0.8, from: initialPointer, to: { x: 600, y: 60 } }
     await renderVideo({ rawPath, directory, ffmpeg: await probeFfmpeg(),
-      trace: { initialPointer, clicks: [], moves: [{ at: 0.1, duration: 0.8, from: initialPointer, to: { x: 600, y: 60 } }], end: 1.1 },
+      trace: { initialPointer, clicks: [], moves: [move], end: 1.1 },
       config: { video: { width: 640, height: 120, fps: 60 }, scale: 1, postRoll: 0.1, output },
     })
     const pixelsPath = join(directory, 'cursor.gray')
@@ -122,6 +124,12 @@ test('a sparse static capture still renders a smoothly moving cursor at 60 FPS',
     assert.ok(positions[0] < 25 && positions.at(-1) > 590)
     assert.ok(new Set(positions).size > 30, `Only ${new Set(positions).size} cursor positions were rendered`)
     assert.ok(positions.every((x, i) => i === 0 || x >= positions[i - 1]), 'cursor moved backwards')
+    // The drawn cursor must follow the curve the browser pointer moved along.
+    positions.forEach((left, frame) => {
+      const progress = Math.min(1, Math.max(0, (frame / 60 - move.at) / move.duration))
+      const expected = positions[0] + (move.to.x - move.from.x) * easeOutCubic(progress)
+      assert.ok(Math.abs(left - expected) <= 2, `frame ${frame}: cursor at ${left}, expected ${expected.toFixed(1)}`)
+    })
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
