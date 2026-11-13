@@ -7,6 +7,8 @@ import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 
+import { assertDecodes } from './helpers.mjs'
+
 const cli = fileURLToPath(new URL('../src/cli.mjs', import.meta.url))
 const exec = promisify(execFile)
 
@@ -82,7 +84,7 @@ test('CLI Ctrl-C keeps exit 130, interruption messages and partial capture witho
     assert.match(result.stderr, /Recording was interrupted/)
     assert.doesNotMatch(result.stderr, /FLOW_FAILED|Recording time:|Screenshot:/)
     assert.deepEqual(await readdir(runDirectory), ['capture.mkv'])
-    await exec('ffmpeg', ['-v', 'error', '-xerror', '-i', join(runDirectory, 'capture.mkv'), '-f', 'null', '-'])
+    await assertDecodes(join(runDirectory, 'capture.mkv'))
   })
 })
 

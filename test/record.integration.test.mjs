@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { record } from '../src/index.mjs'
+import { withTemporaryDirectory } from './helpers.mjs'
 
 // Flow source that defines markStarted(), which writes a "started" file next to the flow.
 const markStarted = `import { writeFileSync } from 'node:fs'\nconst markStarted = () => writeFileSync(new URL('./started', import.meta.url), '')\n`
@@ -15,20 +16,16 @@ async function withRecording(flowSource, run) {
   const fixtures = await mkdtemp(join(tmpdir(), 'traceframe-abort-fixtures-'))
   const temp = await mkdtemp(join(tmpdir(), 'traceframe-abort-tmp-'))
   const outputDirectory = await mkdtemp(join(tmpdir(), 'traceframe-abort-out-'))
-  const previousTemp = process.env.TMPDIR
-  process.env.TMPDIR = temp
   try {
     await writeFile(join(fixtures, 'page.html'), '<button style="margin:200px">Ready</button>')
     await writeFile(join(fixtures, 'flow.mjs'), flowSource)
-    await run({
+    await withTemporaryDirectory(temp, () => run({
       options: { url: pathToFileURL(join(fixtures, 'page.html')).href, flow: join(fixtures, 'flow.mjs'), output: join(outputDirectory, 'video.mp4') },
       fixtures,
       temp,
       outputDirectory,
-    })
+    }))
   } finally {
-    if (previousTemp === undefined) delete process.env.TMPDIR
-    else process.env.TMPDIR = previousTemp
     await Promise.all([fixtures, temp, outputDirectory].map((directory) => rm(directory, { recursive: true, force: true })))
   }
 }

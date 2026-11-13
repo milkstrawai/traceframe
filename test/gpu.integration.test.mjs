@@ -9,6 +9,7 @@ import { promisify } from 'node:util'
 import { chromium } from 'playwright'
 
 import { record } from '../src/index.mjs'
+import { assertDecodes } from './helpers.mjs'
 
 const exec = promisify(execFile)
 
@@ -44,7 +45,7 @@ export default async function ({ page, click, wait }) { flows++; await click(pag
     assert.ok(summary.captureStats.framesReceived > 0)
     const probe = await exec('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'json', summary.output])
     assert.deepEqual(JSON.parse(probe.stdout).streams, [{ width: 640, height: 480 }])
-    await exec('ffmpeg', ['-v', 'error', '-xerror', '-i', summary.output, '-f', 'null', '-'])
+    await assertDecodes(summary.output)
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
