@@ -4,7 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { runFiles } from './config.mjs'
 import { TraceframeError } from './errors.mjs'
 import { addDiagnostics, retainedFile } from './diagnostics.mjs'
-import { createFlowApi, secondsSince } from './flow.mjs'
+import { createFlowApi, createTrace, secondsSince } from './flow.mjs'
 import { createCaptureStats } from './capture-stats.mjs'
 import { createJpegCapture } from './jpeg-capture.mjs'
 import { launchBrowser } from './browser.mjs'
@@ -23,7 +23,7 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
   const signal = callerSignal ? AbortSignal.any([callerSignal, captureErrors.signal]) : captureErrors.signal
   const files = runFiles(directory)
   const rawPath = files.capture
-  const trace = { initialPointer: flow.initialPointer, moves: [], clicks: [] }
+  const trace = createTrace(flow.initialPointer)
   const stats = config.captureDiagnostics ? createCaptureStats() : undefined
 
   signal.throwIfAborted()

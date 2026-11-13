@@ -35,7 +35,13 @@ export function createFlow(run, viewport, initialPointer) {
   return { run, initialPointer: { x, y } }
 }
 
-// Events are timed in seconds from `clock`, the epoch milliseconds of the first video frame.
+// The pointer timeline that render.mjs draws. Flow helpers add moves ({ at, duration, from, to }) and clicks
+// ({ at, point }), and the capture sets `end` when the flow returns. Times are seconds from `clock`, the epoch
+// milliseconds of the first video frame.
+export function createTrace(initialPointer) {
+  return { initialPointer, moves: [], clicks: [] }
+}
+
 export function secondsSince(clock) {
   return (Date.now() - clock) / 1000
 }
