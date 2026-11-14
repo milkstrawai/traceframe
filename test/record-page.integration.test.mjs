@@ -27,7 +27,8 @@ async function withPage(check, { scale = 1, deviceScaleFactor = scale, persisten
     await check({ page, context, directory, options: { page, scale, output: join(directory, 'video.mp4'), postRoll: 0 } })
   } finally {
     await (browser ?? context).close()
-    await rm(directory, { recursive: true, force: true })
+    // On Windows, Chromium can still hold the persistent profile's chrome_debug.log just after closing.
+    await rm(directory, { recursive: true, force: true, maxRetries: 10 })
   }
 }
 
