@@ -91,6 +91,17 @@ for (const failure of failures) {
   })
 }
 
+test('a rejected GPU browser closes only after its graphics session detaches', async (t) => {
+  mockDevices(t)
+  const first = stub(software), second = stub()
+  const order = []
+  first.session.detach = async () => { await new Promise(resolve => setImmediate(resolve)); order.push('detached') }
+  first.browser.close = async () => { order.push('closed') }
+  const launch = t.mock.method(chromium, 'launch', async () => launch.mock.callCount() === 0 ? first.browser : second.browser)
+  await launchBrowser(config, { handleSignals: true, signal })
+  assert.deepEqual(order, ['detached', 'closed'])
+})
+
 test('a failed software retry propagates its error with no further retries', async (t) => {
   mockDevices(t)
   const s = stub(software)

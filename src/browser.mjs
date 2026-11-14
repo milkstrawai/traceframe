@@ -58,8 +58,9 @@ async function inspectGraphics(browser, signal) {
       try {
         return await session.send('SystemInfo.getInfo')
       } finally {
-        // A rejected browser is closed next, so do not wait for the session.
-        session.detach().catch(() => {})
+        // A rejected browser is closed next. On Windows, closing it while this detach was pending
+        // sometimes left Chromium running until Playwright killed it 30 seconds later.
+        await session.detach().catch(() => {})
       }
     }, GRAPHICS_CHECK_TIMEOUT, new Error('Graphics check timed out.'), signal)
     const compositing = gpu.featureStatus?.gpu_compositing
