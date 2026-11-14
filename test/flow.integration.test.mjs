@@ -400,17 +400,24 @@ for (const action of ['click', 'hover', 'scroll']) {
 test('reports a replacement that keeps moving after scrolling', { timeout: 30_000 }, async () => {
   await withPage(`
     <!doctype html>
-    <style>.enter { animation:enter 1s linear infinite alternate } @keyframes enter { to { transform:translateY(100px) } }</style>
     <section id="panel" style="margin:100px;height:350px;overflow:auto"><div style="height:800px"></div><button id="target">Action</button><div style="height:800px"></div></section>
     <script>
       panel.addEventListener('scroll', () => {
         const button = document.querySelector('#target')
         const replacement = button.cloneNode(true)
-        replacement.className = 'enter'
         const loading = document.createElement('div')
         loading.style.height = button.offsetHeight + 'px'
         button.replaceWith(loading)
-        setTimeout(() => loading.replaceWith(replacement), 800)
+        setTimeout(() => {
+          loading.replaceWith(replacement)
+          // Move it from script on every frame. A CSS transform animation can hold its first position until the
+          // compositor starts it, and on a slow machine two such frames pass Playwright's stability check.
+          const move = (time) => {
+            replacement.style.transform = 'translateY(' + (time / 10 % 100) + 'px)'
+            requestAnimationFrame(move)
+          }
+          requestAnimationFrame(move)
+        }, 800)
       }, { once: true })
     </script>
   `, async ({ page, trace, api }) => {
