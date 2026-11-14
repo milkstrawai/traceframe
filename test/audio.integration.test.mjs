@@ -12,6 +12,7 @@ import { chromium } from 'playwright'
 import { record, recordPage } from '../src/index.mjs'
 import { probeFfmpeg, runCommand } from '../src/ffmpeg.mjs'
 import { renderVideo } from '../src/render.mjs'
+import { assertDecodes } from './helpers.mjs'
 
 const exec = promisify(execFile)
 const cli = fileURLToPath(new URL('../src/cli.mjs', import.meta.url))
@@ -54,7 +55,7 @@ async function withMedia(check) {
 }
 
 async function inspect(path) {
-  await runCommand('ffmpeg', ['-v', 'error', '-xerror', '-i', path, '-f', 'null', '-'])
+  await assertDecodes(path)
   const { stdout } = await runCommand('ffprobe', ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', path])
   const media = JSON.parse(stdout)
   const audio = media.streams.filter((stream) => stream.codec_type === 'audio')

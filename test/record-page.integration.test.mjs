@@ -8,6 +8,7 @@ import { promisify } from 'node:util'
 import { chromium } from 'playwright'
 
 import { recordPage } from '../src/index.mjs'
+import { assertDecodes } from './helpers.mjs'
 
 const run = promisify(execFile)
 const viewport = { width: 320, height: 240 }
@@ -31,7 +32,7 @@ async function withPage(check, { scale = 1, deviceScaleFactor = scale, persisten
 }
 
 async function checkVideo(path, width, height) {
-  await run('ffmpeg', ['-v', 'error', '-xerror', '-i', path, '-f', 'null', '-'])
+  await assertDecodes(path)
   const { stdout } = await run('ffprobe', ['-v', 'error', '-show_entries', 'stream=width,height,codec_type', '-of', 'json', path])
   assert.deepEqual(JSON.parse(stdout).streams, [{ codec_type: 'video', width, height }])
 }

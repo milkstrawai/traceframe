@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -53,14 +54,20 @@ test('rejects FIFO audio before ffprobe can wait for a writer', { timeout: 10_00
   }
 })
 
-test('waits for an aborted command to exit before rejecting', { skip: process.platform === 'win32' }, async () => {
-  const controller = new AbortController()
-  const slowToExit = "process.on('SIGTERM', () => setTimeout(() => process.exit(), 500)); setInterval(() => {}, 1000)"
-  const running = runCommand(process.execPath, ['-e', slowToExit], { signal: controller.signal })
-  setTimeout(() => controller.abort(), 300)
-  const started = performance.now()
-  await assert.rejects(running)
-  assert.ok(performance.now() - started >= 400)
+test('waits for an aborted command to exit before rejecting', { skip: process.platform === 'win32', timeout: 10_000 }, async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'traceframe-command-exit-'))
+  try {
+    const ready = join(directory, 'ready'), exited = join(directory, 'exited')
+    const controller = new AbortController()
+    const slowToExit = "const fs = require('node:fs'); process.on('SIGTERM', () => setTimeout(() => { fs.writeFileSync(process.argv[2], ''); process.exit() }, 300)); fs.writeFileSync(process.argv[1], ''); setInterval(() => {}, 1000)"
+    const rejected = assert.rejects(runCommand(process.execPath, ['-e', slowToExit, ready, exited], { signal: controller.signal }))
+    while (!existsSync(ready)) await delay(10, undefined, { signal: t.signal })
+    controller.abort()
+    await rejected
+    assert.ok(existsSync(exited), 'rejected before the command exited')
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })
 
 test('Windows cancellation stops a launcher and its child before rejecting', { skip: process.platform !== 'win32', timeout: 15_000 }, async (t) => {

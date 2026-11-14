@@ -7,6 +7,8 @@ import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 
+import { assertDecodes } from './helpers.mjs'
+
 const cli = fileURLToPath(new URL('../src/cli.mjs', import.meta.url))
 const exec = promisify(execFile)
 
@@ -63,7 +65,7 @@ test('CLI still reports flow context without --run-dir and does not claim saved 
     assert.match(result.stderr, /^traceframe: \[FLOW_FAILED\] flow problem/)
     assert.ok(result.stderr.includes(`  Flow: ${flow}:1:`))
     assert.match(result.stderr, /Recording time:/)
-    assert.doesNotMatch(result.stderr, /Capture:|Screenshot:|capture\.webm|failure\.png/)
+    assert.doesNotMatch(result.stderr, /Capture:|Screenshot:|capture\.mkv|failure\.png/)
     assert.deepEqual((await readdir(directory)).sort(), ['flow.mjs', 'page.html'])
   })
 })
@@ -82,7 +84,7 @@ test('CLI Ctrl-C keeps exit 130, interruption messages and partial capture witho
     assert.match(result.stderr, /Recording was interrupted/)
     assert.doesNotMatch(result.stderr, /FLOW_FAILED|Recording time:|Screenshot:/)
     assert.deepEqual(await readdir(runDirectory), ['capture.mkv'])
-    await exec('ffmpeg', ['-v', 'error', '-xerror', '-i', join(runDirectory, 'capture.mkv'), '-f', 'null', '-'])
+    await assertDecodes(join(runDirectory, 'capture.mkv'))
   })
 })
 

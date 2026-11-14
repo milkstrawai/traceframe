@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 
 import { record } from '../src/index.mjs'
+import { assertDecodes, withTemporaryDirectory } from './helpers.mjs'
 
 const run = promisify(execFile)
 const errorModule = new URL('../src/errors.mjs', import.meta.url).href
@@ -41,7 +42,7 @@ async function checkArtifacts(error, options) {
   assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a')
   assert.equal(png.readUInt32BE(16), 640)
   assert.equal(png.readUInt32BE(20), 480)
-  await run('ffmpeg', ['-v', 'error', '-xerror', '-i', error.diagnostics.capturePath, '-f', 'null', '-'])
+  await assertDecodes(error.diagnostics.capturePath)
   await assert.rejects(readFile(options.output), { code: 'ENOENT' })
 }
 
@@ -140,18 +141,12 @@ test('ready failures have a screenshot and flow location but no recording time o
 
 test('a browser setup failure does not claim recording artifacts', { timeout: 30_000 }, async () => {
   await withFixture('export default () => {}', async ({ options, directory }) => {
-    const tempKey = process.platform === 'win32' ? 'TEMP' : 'TMPDIR'
-    const previousTemp = process.env[tempKey]
-    process.env[tempKey] = directory
-    try {
+    await withTemporaryDirectory(directory, async () => {
       const error = await failure({ ...options, browser: join(directory, 'missing-browser') })
       assert.equal(error.code, 'PLAYWRIGHT_RUNTIME_MISSING')
       assert.equal(error.diagnostics, undefined)
       assert.deepEqual(await readdir(options.runDirectory), [])
-    } finally {
-      if (previousTemp === undefined) delete process.env[tempKey]
-      else process.env[tempKey] = previousTemp
-    }
+    })
   })
 })
 
@@ -309,10 +304,7 @@ export default ({ page }) => {
   await withFixture(source, async ({ options, directory, module }) => {
     const temp = join(directory, 'temp')
     await mkdir(temp)
-    const tempKey = process.platform === 'win32' ? 'TEMP' : 'TMPDIR'
-    const previousTemp = process.env[tempKey]
-    process.env[tempKey] = temp
-    try {
+    await withTemporaryDirectory(temp, async () => {
       const error = await failure({ ...options, runDirectory: undefined })
       assert.equal(error.code, 'FLOW_FAILED')
       assert.ok(error.diagnostics.flowLocations.length > 0)
@@ -321,10 +313,7 @@ export default ({ page }) => {
       assert.equal(error.diagnostics.screenshotPath, undefined)
       assert.equal(module.screenshots, 0)
       assert.deepEqual(await readdir(temp), [])
-    } finally {
-      if (previousTemp === undefined) delete process.env[tempKey]
-      else process.env[tempKey] = previousTemp
-    }
+    })
   })
 })
 
@@ -343,7 +332,7 @@ export default async ({ page, wait }) => {
     assert.equal(error, module.reason)
     assert.equal(error.diagnostics, undefined)
     assert.equal(module.screenshots, 0)
-    await run('ffmpeg', ['-v', 'error', '-xerror', '-i', join(options.runDirectory, 'capture.mkv'), '-f', 'null', '-'])
+    await assertDecodes(join(options.runDirectory, 'capture.mkv'))
   })
 })
 

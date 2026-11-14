@@ -49,7 +49,8 @@ export default async ({ page, wait }) => {
 
     await assert.rejects(captureFlow({ config, flow: await loadFlow(flowPath, config.viewport), directory }), error => {
       assert.equal(error.code, 'CAPTURE_SIZE_CHANGED')
-      assert.match(error.message, /from 320×200 for a 320×200 viewport to 300×180 for a 300×180 viewport/)
+      // Chromium can first deliver the new viewport scaled to the old picture width (here 320×192), then the new size.
+      assert.match(error.message, /from 320×200 for a 320×200 viewport to \d+×\d+ for a 300×180 viewport/)
       assert.equal(error.diagnostics.screenshotPath, join(directory, 'failure.png'))
       return true
     })

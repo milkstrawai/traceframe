@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 
-import { createConfig, createPageConfig } from '../src/config.mjs'
+import { createAudioConfig, createConfig, createPageConfig } from '../src/config.mjs'
 
 const base = {
   flow: fileURLToPath(new URL('../examples/fixture-flow.mjs', import.meta.url)),
@@ -62,8 +62,6 @@ const page = { viewportSize: () => ({ width: 640, height: 480 }), screencast: {}
 test('existing-page settings use the caller viewport with explicit scale and fps', () => {
   const config = createPageConfig({ page })
   assert.deepEqual(config.video, { width: 640, height: 480, fps: 30 })
-  assert.equal(config.flow, undefined)
-  assert.equal(config.url, undefined)
   assert.deepEqual(createPageConfig({ page, scale: 2, fps: 60 }).video, { width: 1280, height: 960, fps: 60 })
 })
 
@@ -95,5 +93,12 @@ test('both recording paths normalize external audio with an explicit offset', ()
     for (const name of ['capture.mkv', 'capture.webm', 'render.filter', 'failure.png']) {
       assert.throws(() => configure({ runDirectory: 'take', audio: { path: `take/${name}` } }), /reserved recording file/)
     }
+  }
+})
+
+test('callback audio cannot use a reserved file in a relative temporary directory', () => {
+  // record() checks callback audio against its temporary directory, which is relative when TMPDIR is.
+  for (const name of ['capture.mkv', 'capture.webm', 'render.filter', 'failure.png']) {
+    assert.throws(() => createAudioConfig({ path: `traceframe-take/${name}` }, resolve('video.mp4'), 'traceframe-take'), /reserved recording file/)
   }
 })

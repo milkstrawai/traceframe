@@ -1,12 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { record } from '../src/index.mjs'
+import { withTemporaryDirectory } from './helpers.mjs'
 
 // Flow source that defines markStarted(), which writes a "started" file next to the flow.
 const markStarted = `import { writeFileSync } from 'node:fs'\nconst markStarted = () => writeFileSync(new URL('./started', import.meta.url), '')\n`
@@ -15,20 +17,16 @@ async function withRecording(flowSource, run) {
   const fixtures = await mkdtemp(join(tmpdir(), 'traceframe-abort-fixtures-'))
   const temp = await mkdtemp(join(tmpdir(), 'traceframe-abort-tmp-'))
   const outputDirectory = await mkdtemp(join(tmpdir(), 'traceframe-abort-out-'))
-  const previousTemp = process.env.TMPDIR
-  process.env.TMPDIR = temp
   try {
     await writeFile(join(fixtures, 'page.html'), '<button style="margin:200px">Ready</button>')
     await writeFile(join(fixtures, 'flow.mjs'), flowSource)
-    await run({
+    await withTemporaryDirectory(temp, () => run({
       options: { url: pathToFileURL(join(fixtures, 'page.html')).href, flow: join(fixtures, 'flow.mjs'), output: join(outputDirectory, 'video.mp4') },
       fixtures,
       temp,
       outputDirectory,
-    })
+    }))
   } finally {
-    if (previousTemp === undefined) delete process.env.TMPDIR
-    else process.env.TMPDIR = previousTemp
     await Promise.all([fixtures, temp, outputDirectory].map((directory) => rm(directory, { recursive: true, force: true })))
   }
 }
@@ -121,8 +119,10 @@ test('aborting during a ready hook that ignores the signal stops and removes tem
   })
 })
 
-test('aborting during the render stops FFmpeg and removes temporary files', { timeout: 120_000 }, async () => {
+test('aborting during the render stops FFmpeg, removes temporary files and keeps the previous output', { timeout: 120_000 }, async (t) => {
   await withRecording(`export default async ({ page, hover, wait }) => { await hover(page.getByRole('button'), { duration: 0.5 }); await wait(4) }\n`, async ({ options, temp, outputDirectory }) => {
+    await writeFile(options.output, 'previous output')
+    const kill = t.mock.method(ChildProcess.prototype, 'kill')
     const controller = new AbortController()
     const reason = new Error('stop')
     const watcher = setInterval(async () => {
@@ -136,9 +136,11 @@ test('aborting during the render stops FFmpeg and removes temporary files', { ti
     }
 
     assert.ok(controller.signal.aborted)
+    // On Windows, runCommand stops FFmpeg with taskkill instead; ffmpeg.test.mjs covers that path.
+    if (process.platform !== 'win32') assert.ok(kill.mock.calls.some((call) => call.this.spawnargs[0] === 'ffmpeg'), 'FFmpeg kept running after the abort')
     assert.deepEqual(await readdir(temp), [])
-    assert.deepEqual(await readdir(outputDirectory), [])
-    assert.equal(existsSync(options.output), false)
+    assert.deepEqual(await readdir(outputDirectory), ['video.mp4'])
+    assert.equal(await readFile(options.output, 'utf8'), 'previous output')
   })
 })
 

@@ -1,6 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises'
 import { pathToFileURL } from 'node:url'
 
+import { easeOutCubic } from './easing.mjs'
 import { TraceframeError } from './errors.mjs'
 
 export const LIMITS = {
@@ -34,7 +35,17 @@ export function createFlow(run, viewport, initialPointer) {
   return { run, initialPointer: { x, y } }
 }
 
-// Events are timed in seconds from `clock`, the epoch milliseconds of the first video frame.
+// The pointer timeline that render.mjs draws. Flow helpers add moves ({ at, duration, from, to }) and clicks
+// ({ at, point }), and the capture sets `end` when the flow returns. Times are seconds from `clock`, the epoch
+// milliseconds of the first video frame.
+export function createTrace(initialPointer) {
+  return { initialPointer, moves: [], clicks: [] }
+}
+
+export function secondsSince(clock) {
+  return (Date.now() - clock) / 1000
+}
+
 export function createFlowApi({ page, trace, clock, viewport, signal }) {
   let pointer = trace.initialPointer
   const sleep = (milliseconds) => delay(milliseconds, undefined, { signal })
@@ -92,7 +103,7 @@ export function createFlowApi({ page, trace, clock, viewport, signal }) {
       const element = await locator.elementHandle({ signal })
       handles.push(element)
       await element.waitForElementState('enabled', { signal }).catch((error) => {
-        throw error.name === 'TimeoutError' ? new TraceframeError(`${locator} stayed disabled.`, { code: 'FLOW_TARGET_DISABLED', cause: error }) : error
+        throw fromTimeout(error, `${locator} stayed disabled.`, 'FLOW_TARGET_DISABLED')
       })
       await assertReceivesPointer(element, locator, point, handles)
       const at = secondsSince(clock)
@@ -143,21 +154,17 @@ function insideViewport(point, viewport) {
   return point?.x >= 0 && point?.y >= 0 && point.x <= viewport.width && point.y <= viewport.height
 }
 
-function secondsSince(clock) {
-  return (Date.now() - clock) / 1000
-}
-
-// render.mjs draws the cursor along the same curve.
-function easeOutCubic(progress) {
-  return 1 - (1 - progress) ** 3
-}
-
 function durationSeconds(value, name, { allowZero = false } = {}) {
   if (!Number.isFinite(value) || (allowZero ? value < 0 : value <= 0) || value > LIMITS.maxActionDuration) {
     const range = allowZero ? 'between 0 and' : 'more than 0 and at most'
     throw new TraceframeError(`The ${name} must be ${range} ${LIMITS.maxActionDuration} seconds.`, { code: 'INVALID_FLOW' })
   }
   return value
+}
+
+// Playwright reports a wait that ran out of time as a TimeoutError; name what the flow was waiting for instead.
+function fromTimeout(error, message, code) {
+  return error?.name === 'TimeoutError' ? new TraceframeError(message, { code, cause: error }) : error
 }
 
 function assertBelowLimit(events, limit, type) {
@@ -238,14 +245,14 @@ async function scrollIntoView(element, locator, signal, handles) {
     }
     // The page may replace the target while it scrolls, or remove or hide it, as a menu that closes on scroll does.
     const target = await findTarget(locator, signal, handles).catch((error) => {
-      throw error.name === 'TimeoutError' ? new TraceframeError(`${locator} disappeared when it was scrolled into view.`, { code: 'FLOW_TARGET_MISSING', cause: error }) : error
+      throw fromTimeout(error, `${locator} disappeared when it was scrolled into view.`, 'FLOW_TARGET_MISSING')
     })
     await target.element.waitForElementState('stable', { signal })
     const box = await target.element.boundingBox()
     if (!box) throw new TraceframeError(`Could not find ${locator}.`, { code: 'FLOW_TARGET_MISSING' })
     return { element: target.element, box }
   } catch (error) {
-    throw error.name === 'TimeoutError' ? new TraceframeError(`${locator} kept moving after it was scrolled into view.`, { code: 'FLOW_TARGET_MOVED', cause: error }) : error
+    throw fromTimeout(error, `${locator} kept moving after it was scrolled into view.`, 'FLOW_TARGET_MOVED')
   }
 }
 

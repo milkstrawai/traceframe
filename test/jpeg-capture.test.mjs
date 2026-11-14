@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createJpegCapture } from '../src/jpeg-capture.mjs'
 import { runCommand } from '../src/ffmpeg.mjs'
+import { assertDecodes } from './helpers.mjs'
 
 async function fixture(check) {
   const directory = await mkdtemp(join(tmpdir(), 'traceframe-jpeg-'))
@@ -27,7 +28,7 @@ test('JPEG capture preserves source timestamps, sorts delayed frames, and retain
     const probe = JSON.parse(stdout)
     assert.deepEqual(probe.packets.map(packet => Number(packet.pts_time)), [0, 0.04, 0.08, 0.3])
     assert.deepEqual(probe.streams.map(({ codec_name, width, height }) => ({ codec_name, width, height })), [{ codec_name: 'mjpeg', width: 32, height: 24 }])
-    await runCommand('ffmpeg', ['-v', 'error', '-xerror', '-i', path, '-f', 'null', '-'])
+    await assertDecodes(path)
     assert.equal(capture.stats.lateFrames, 0)
   })
 })
@@ -123,7 +124,7 @@ for (const fail of [false, true]) {
         assert.ok(capture.stats.writeWaitMs >= capture.stats.maxWriteWaitMs)
         assert.equal(stream.destroyed, true)
         assert.equal(failed.length, fail ? 1 : 0)
-        if (!fail) await runCommand('ffmpeg', ['-v', 'error', '-xerror', '-i', path, '-f', 'null', '-'])
+        if (!fail) await assertDecodes(path)
       } finally {
         release.resolve()
         await capture?.stop().catch(() => {})

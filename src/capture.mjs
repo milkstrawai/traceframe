@@ -1,10 +1,10 @@
 import { writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 
+import { runFiles } from './config.mjs'
 import { TraceframeError } from './errors.mjs'
 import { addDiagnostics, retainedFile } from './diagnostics.mjs'
-import { createFlowApi } from './flow.mjs'
+import { createFlowApi, createTrace, secondsSince } from './flow.mjs'
 import { createCaptureStats } from './capture-stats.mjs'
 import { createJpegCapture } from './jpeg-capture.mjs'
 import { launchBrowser } from './browser.mjs'
@@ -12,6 +12,7 @@ import { raceAbort, withDeadline } from './deadline.mjs'
 
 const PLAYWRIGHT_DEFAULT_TIMEOUT = 30_000
 const FIRST_FRAME_TIMEOUT = 10_000
+const GEOMETRY_CHECK_TIMEOUT = 10_000
 const FAILURE_SCREENSHOT_TIMEOUT = 5_000
 // Playwright uses the screencast fps only to let Chromium have 10 frames in flight above 30,
 // otherwise 5. Export sets the output rate, so 30 FPS output keeps the larger allowance: with 5,
@@ -21,8 +22,9 @@ const SCREENCAST_FPS = 60
 export async function captureFlow({ config, flow, directory, page, signal: callerSignal }) {
   const captureErrors = new AbortController()
   const signal = callerSignal ? AbortSignal.any([callerSignal, captureErrors.signal]) : captureErrors.signal
-  const rawPath = join(directory, 'capture.mkv')
-  const trace = { initialPointer: flow.initialPointer, moves: [], clicks: [] }
+  const files = runFiles(directory)
+  const rawPath = files.capture
+  const trace = createTrace(flow.initialPointer)
   const stats = config.captureDiagnostics ? createCaptureStats() : undefined
 
   signal.throwIfAborted()
@@ -34,6 +36,16 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
   async function stopCapture() {
     const stoppedAt = Date.now()
     try { await page.screencast.stop() } finally { await capture?.stop(stoppedAt) }
+  }
+  // After a failure, flush the frames captured so far before the browser closes, including on slower disks.
+  async function savePartialCapture() {
+    try {
+      if (recording) await stopCapture().catch(() => {})
+      await capture?.stop()
+      return clock !== undefined && config.runDirectory ? await retainedFile(rawPath) : undefined
+    } catch {
+      return undefined
+    }
   }
   try {
     if (browser) {
@@ -90,7 +102,7 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
       if (signal.aborted || error instanceof TraceframeError) throw error
       throw new TraceframeError(error instanceof Error ? error.message : String(error), { code: 'FLOW_FAILED', cause: error })
     }
-    trace.end = (Date.now() - clock) / 1000
+    trace.end = secondsSince(clock)
     await delay(config.postRoll * 1000, undefined, { signal })
     // Stop the page subscription only once, including when shutdown fails.
     recording = false
@@ -100,15 +112,11 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
     failed = true
     // A writer failure during cleanup must not replace the initiating failure.
     const failure = signal.aborted ? signal.reason : error
-    const recordingTime = clock === undefined ? undefined : Math.max(0, (Date.now() - clock) / 1000)
-    // Flush captured frames before closing the browser, including on slower disks.
+    const recordingTime = clock === undefined ? undefined : Math.max(0, secondsSince(clock))
     const [capturePath, screenshotPath] = await Promise.all([
-      (recording ? stopCapture().catch(() => {}) : Promise.resolve())
-        .then(() => capture?.stop())
-        .then(() => clock !== undefined && config.runDirectory ? retainedFile(rawPath) : undefined)
-        .catch(() => undefined),
+      savePartialCapture(),
       // A frame size change or a capture write error also aborts signal; only caller cancellation skips this.
-      config.runDirectory && page && !callerSignal?.aborted ? saveFailureScreenshot(page, directory, callerSignal) : undefined,
+      config.runDirectory && page && !callerSignal?.aborted ? saveFailureScreenshot(page, files.screenshot, callerSignal) : undefined,
     ])
     if (callerSignal?.aborted) throw callerSignal.reason
     throw await addDiagnostics(failure, { flow: config.flow, recordingTime, capturePath, screenshotPath })
@@ -125,8 +133,8 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
 async function assertPageGeometry(page, config, signal) {
   const [width, height, scale, left, top] = await withDeadline(
     () => page.evaluate(() => [innerWidth, innerHeight, visualViewport.scale, visualViewport.offsetLeft, visualViewport.offsetTop]),
-    FIRST_FRAME_TIMEOUT,
-    new TraceframeError(`Could not verify page geometry within ${FIRST_FRAME_TIMEOUT / 1000} seconds. Make sure the page is responsive.`, { code: 'CAPTURE_SIZE_MISMATCH' }),
+    GEOMETRY_CHECK_TIMEOUT,
+    new TraceframeError(`Could not verify page geometry within ${GEOMETRY_CHECK_TIMEOUT / 1000} seconds. Make sure the page is responsive.`, { code: 'CAPTURE_SIZE_MISMATCH' }),
     signal,
   )
   if (width !== config.viewport.width || height !== config.viewport.height || scale !== 1 || left !== 0 || top !== 0) {
@@ -134,24 +142,24 @@ async function assertPageGeometry(page, config, signal) {
   }
 }
 
-// [JPEG width, JPEG height, viewport width, viewport height]; the JPEG values are undefined if unreadable.
+// The JPEG width and height are undefined if the JPEG is unreadable.
 function frameSize(frame) {
   const jpeg = jpegSize(frame.data)
-  return [jpeg?.width, jpeg?.height, frame.viewportWidth, frame.viewportHeight]
+  return { width: jpeg?.width, height: jpeg?.height, viewportWidth: frame.viewportWidth, viewportHeight: frame.viewportHeight }
 }
 
 function sameSize(a, b) {
-  return a.every((value, index) => value === b[index])
+  return a.width === b.width && a.height === b.height && a.viewportWidth === b.viewportWidth && a.viewportHeight === b.viewportHeight
 }
 
-function describeSize([width, height, viewportWidth, viewportHeight]) {
+function describeSize({ width, height, viewportWidth, viewportHeight }) {
   return `${width === undefined ? 'an unreadable JPEG' : `${width}×${height}`} for a ${viewportWidth}×${viewportHeight} viewport`
 }
 
 function assertFrameSize(frame, config) {
   // Check the exported JPEG dimensions; deviceScaleFactor alone is insufficient.
   const size = frameSize(frame)
-  const expected = [config.video.width, config.video.height, config.viewport.width, config.viewport.height]
+  const expected = { width: config.video.width, height: config.video.height, viewportWidth: config.viewport.width, viewportHeight: config.viewport.height }
   if (!sameSize(size, expected)) {
     const scaleHint = config.scale === 2 ? ' For scale 2, launch Chromium with --force-device-scale-factor=2; deviceScaleFactor alone is insufficient.' : ''
     throw new TraceframeError(`Screencast frames are ${describeSize(size)}; expected ${describeSize(expected)}. Keep the viewport fixed and use the page exclusively for this recording.${scaleHint}`, { code: 'CAPTURE_SIZE_MISMATCH' })
@@ -172,12 +180,11 @@ function jpegSize(data) {
   }
 }
 
-async function saveFailureScreenshot(page, directory, signal) {
+async function saveFailureScreenshot(page, path, signal) {
   try {
     return await withDeadline(async (diagnosticSignal) => {
       const screenshot = await page.screenshot({ timeout: FAILURE_SCREENSHOT_TIMEOUT })
       diagnosticSignal.throwIfAborted()
-      const path = join(directory, 'failure.png')
       await writeFile(path, screenshot, { signal: diagnosticSignal })
       return path
     }, FAILURE_SCREENSHOT_TIMEOUT, new Error('Failure screenshot timed out.'), signal)
