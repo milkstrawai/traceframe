@@ -18,8 +18,8 @@ const EARLY = 0.002
 const LATE = 0.15
 
 // A narration whose clips come from `clips` by text, after `latency` seconds, with a flow clock that started
-// `elapsed` seconds ago. click() moves for `move` seconds (its duration unless set), dwells, waits for its line's
-// `beforePress`, and returns when it pressed, as the flow's click does.
+// `elapsed` seconds ago (negative: still to come). click() moves for `move` seconds (its duration unless set),
+// dwells, waits for its line's `beforePress`, and returns when it pressed, as the flow's click does.
 function setup({ clips, latency = 0, elapsed = 0, move, drawCaptions } = {}) {
   const narration = createNarration({ rate: RATE, speak: async (text) => { await delay(latency * 1000); return clips[text] }, drawCaptions })
   const clock = Date.now() - elapsed * 1000
@@ -169,6 +169,19 @@ test('lays the lines out on one track and places each caption', async () => {
     for (const line of narration.lines) assert.ok(loudness(line.start + 0.15, line.start + 0.35) > 3000)
     assert.ok(loudness(narration.lines[0].start + 0.55, narration.lines[1].start + 0.05) < 300)
     assert.deepEqual(await narration.finish({ directory, trace, viewport, scale: 2, captions: false }), { audio })
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('a line said as the take begins starts at the first frame, even when that frame came from a clock ahead of Node', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'traceframe-narration-'))
+  try {
+    // The first frame's time is Chromium's, here 50 ms ahead of Node's clock, so the line is said "before" it.
+    const { narration, say } = setup({ clips: { 'One.': clip(0.1, 0.3, 0.1) }, elapsed: -0.05 })
+    await say('One.')
+    const { audio } = await narration.finish({ directory, captions: false })
+    assert.deepEqual(audio.spoken, [{ start: 0, end: 0.5 }])
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

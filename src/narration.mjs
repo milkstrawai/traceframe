@@ -59,7 +59,9 @@ export function createNarration({ rate, speak, drawCaptions }) {
         const samples = await audio
         // Only a line spoken to its end goes on the track, so a failed line never overlaps the next.
         await sleepUntil(start + samples.length / rate + GAP)
-        lines.push({ text, samples, start, caption })
+        // The first frame's time is Chromium's, which can run ahead of Node's clock, so a line said as the take
+        // begins can seem to start before it.
+        lines.push({ text, samples, start: Math.max(0, start), caption })
       }
       return { speech: speech(), audio, action }
     }
