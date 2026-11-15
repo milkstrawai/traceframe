@@ -49,6 +49,8 @@ export async function runCommand(command, args, options = {}) {
   const windowsSignal = process.platform === 'win32' ? options.signal : undefined
   windowsSignal?.throwIfAborted()
   const run = execFileAsync(command, args, windowsSignal ? { ...options, signal: undefined } : options)
+  // `input` goes to the command's standard input. A command that exits early reports its own error.
+  if (options.input) run.child.stdin.on('error', () => {}).end(options.input)
   const closed = new Promise((resolve) => run.child.once('close', resolve))
   let termination
   const abort = windowsSignal && addAbortListener(windowsSignal, () => {

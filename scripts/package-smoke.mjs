@@ -23,7 +23,7 @@ try {
   const manifest = JSON.parse(await readFile(join(installed, 'package.json'), 'utf8'))
   const bin = join(installed, manifest.bin.traceframe)
   const examples = join(installed, 'examples')
-  const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+  const { version, devDependencies } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
   assert.equal((await run(process.execPath, [bin, '--version'])).stdout, `${version}\n`)
   assert.equal((await run(process.execPath, ['--input-type=module', '-e', 'const { record, recordPage } = await import("@milkstraw/traceframe"); console.log(typeof record, typeof recordPage)'], { cwd: directory })).stdout, 'function function\n')
 
@@ -54,7 +54,17 @@ try {
   assert.equal(pageSummary.width, 1280)
   assert.equal(pageSummary.height, 800)
   await run('ffmpeg', ['-v', 'error', '-xerror', '-i', pageSummary.output, '-f', 'null', '-'])
-  console.log(JSON.stringify({ package: filename, duration: summary.duration, existingPageDuration: pageSummary.duration }))
+
+  // Voice stops before recording until the project installs phonon-tts, and then narrates.
+  const narrated = join(directory, 'narrated.mjs')
+  await writeFile(narrated, "export const voice = true\nexport default async ({ say }) => { await say('Traceframe speaks.') }\n")
+  const narrate = () => run(process.execPath, [bin, 'record', '--preset', 'draft', '--url', 'data:text/html,<h1>Voice</h1>', '--flow', narrated, '--out', join(directory, 'narrated.mp4')], { cwd: directory })
+  await assert.rejects(narrate(), ({ stderr }) => stderr.includes('[VOICE_RUNTIME_MISSING]') && stderr.includes(`npm install -D phonon-tts@${devDependencies['phonon-tts']}`))
+  await run(process.execPath, [npm, 'install', '--no-audit', '--no-fund', `phonon-tts@${devDependencies['phonon-tts']}`], { cwd: directory })
+  const narratedSummary = JSON.parse((await narrate()).stdout)
+  assert.equal(narratedSummary.lineCount, 1)
+  assert.equal(narratedSummary.audio, true)
+  console.log(JSON.stringify({ package: filename, duration: summary.duration, existingPageDuration: pageSummary.duration, narratedDuration: narratedSummary.duration }))
 } finally {
   await rm(directory, { recursive: true, force: true })
 }

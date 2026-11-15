@@ -2,7 +2,7 @@ import test, { after, before } from 'node:test'
 import assert from 'node:assert/strict'
 import { chromium } from 'playwright'
 
-import { createFlowApi } from '../src/flow.mjs'
+import { createFlowApi, createTrace } from '../src/flow.mjs'
 
 let browser
 before(async () => { browser = await chromium.launch() })
@@ -12,7 +12,7 @@ async function withPage(html, run) {
   const viewport = { width: 640, height: 480 }
   const page = await browser.newPage({ viewport })
   const controller = new AbortController()
-  const trace = { initialPointer: { x: 20, y: 20 }, moves: [], clicks: [] }
+  const trace = createTrace({ x: 20, y: 20 })
   try {
     await page.setContent(html)
     await page.mouse.move(trace.initialPointer.x, trace.initialPointer.y)

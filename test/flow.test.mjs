@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { setTimeout as delay } from 'node:timers/promises'
 
-import { createFlowApi } from '../src/flow.mjs'
+import { createFlow, createFlowApi, createTrace } from '../src/flow.mjs'
 
 const box = { x: 100, y: 100, width: 80, height: 40 }
 
@@ -14,17 +15,20 @@ function setup() {
       async up() { this.upAt = performance.now() },
     },
   }
-  const trace = { initialPointer: { x: 20, y: 20 }, moves: [], clicks: [] }
+  const trace = createTrace({ x: 20, y: 20 })
   const api = createFlowApi({ page, trace, clock: Date.now(), viewport: { width: 400, height: 300 } })
   return { page, trace, api }
 }
 
 // A target whose box depends on the phase: before the pointer moves, after it arrives, just before the click, and while pressed.
-function target(page, { start = box, arrived = start, beforeClick = arrived, pressed = beforeClick, enabledError, receivesPointer = true } = {}) {
+function target(page, { start = box, arrived = start, beforeClick = arrived, pressed = beforeClick, enabledError, enabling, receivesPointer = true } = {}) {
   const element = {
     async dispose() {},
     async boundingBox() { return page.mouse.downAt !== undefined ? pressed : page.mouse.moves.length ? beforeClick : start },
-    async waitForElementState() { if (enabledError) throw enabledError },
+    async waitForElementState() {
+      if (enabledError) throw enabledError
+      await enabling
+    },
     // The hit test passes the point to check; aiming passes nothing.
     async evaluate(_, point) { return point ? receivesPointer : { x: 0.5, y: 0.5 } },
     async ownerFrame() { return { parentFrame: () => null } },
@@ -118,4 +122,54 @@ test('holds the mouse button down briefly like a person', async () => {
 test('requires a wait duration', async () => {
   const { api } = setup()
   await assert.rejects(api.wait(), { code: 'INVALID_FLOW', message: /wait must be between 0 and 30 seconds/ })
+})
+
+test('records each element the pointer sets off for, where it ends up', async () => {
+  const { api, page, trace } = setup()
+  const arrived = { x: 96, y: 98, width: 88, height: 44 }
+  await api.hover(target(page, { arrived }), { duration: 0.01 })
+  await api.click(target(page, { start: arrived }), { duration: 0.01, dwell: 0 })
+  assert.deepEqual(trace.targets.map((target) => target.box), [arrived, arrived])
+  assert.ok(trace.targets[0].at <= trace.moves[0].at && trace.targets[1].at >= trace.targets[0].at)
+  // Moving the pointer elsewhere ends the last element's use.
+  await api.move({ x: 300, y: 250 }, { duration: 0.01 })
+  assert.deepEqual(Object.keys(trace.targets.at(-1)), ['at'])
+})
+
+test('the click that say() uses presses only once its line is ready, and returns the press time', async () => {
+  const page = setup().page
+  const trace = createTrace({ x: 20, y: 20 })
+  let click
+  createFlowApi({ page, trace, clock: Date.now(), viewport: { width: 400, height: 300 }, narration: { narrator: (helpers) => { click = helpers.click } } })
+  const order = []
+  const at = await click(target(page), { duration: 0.01, dwell: 0 }, {
+    async beforePress() {
+      await delay(50)
+      order.push(page.mouse.downAt === undefined ? 'ready' : 'late')
+    },
+  })
+  assert.deepEqual(order, ['ready'])
+  assert.equal(at, trace.clicks[0].at)
+
+  // A line that fails while its target is still being checked stops the press.
+  const line = new AbortController()
+  const failure = new Error('during failed')
+  const enabling = delay(50).then(() => line.abort(failure))
+  await assert.rejects(click(target(page, { enabling }), { duration: 0.01, dwell: 0 }, { signal: line.signal }), (error) => error === failure)
+  assert.equal(trace.clicks.length, 1)
+})
+
+test('say() asks for voice when the flow does not turn it on', async () => {
+  const { api } = setup()
+  await assert.rejects(api.say('Hello.'), { code: 'INVALID_FLOW', message: /needs voice/ })
+})
+
+test('voice is off, on with captions, or on without them', () => {
+  const viewport = { width: 400, height: 300 }
+  const voiceOf = (voice) => createFlow(() => {}, viewport, undefined, voice).voice
+  assert.equal(voiceOf(undefined), undefined)
+  assert.equal(voiceOf(false), undefined)
+  assert.deepEqual(voiceOf(true), { captions: true })
+  assert.deepEqual(voiceOf({ captions: false }), { captions: false })
+  for (const voice of ['yes', null, {}, { captions: 'no' }]) assert.throws(() => voiceOf(voice), { code: 'INVALID_FLOW' })
 })

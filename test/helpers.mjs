@@ -21,3 +21,15 @@ export async function withTemporaryDirectory(directory, run) {
     })
   }
 }
+
+// Audio of silence and loud noise, as [quiet, loud, quiet, ...] seconds at `rate`.
+export function noise(rate, ...seconds) {
+  const audio = new Float32Array(Math.round(seconds.reduce((sum, value) => sum + value, 0) * rate))
+  let at = 0
+  seconds.forEach((length, index) => {
+    const end = at + Math.round(length * rate)
+    if (index % 2) for (let sample = at; sample < end; sample++) audio[sample] = (sample % 7) / 7 - 0.4
+    at = end
+  })
+  return audio
+}

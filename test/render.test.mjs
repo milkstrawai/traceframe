@@ -27,6 +27,42 @@ test('draws one cursor segment per move and one pulse per click', () => {
   assert.match(script, /\[final\]$/)
 })
 
+test('draws captions over the page and under the click pulses and cursor', () => {
+  const trace = { initialPointer: { x: 10, y: 20 }, moves: [{ at: 0, duration: 0.5, from: { x: 10, y: 20 }, to: { x: 50, y: 60 } }], clicks: [{ at: 1, point: { x: 50, y: 60 } }] }
+  const captions = [{ path: 'one.png', start: 0.5, end: 1.5, x: 10, y: 20 }, { path: 'two.png', start: 2, end: 3.25, x: 30, y: 40 }]
+  const script = buildFilterScript({ trace, scale: 1, fps: 60, audio: { offset: 0 }, captions, overlayEofAction: 'pass' })
+  assert.match(script, /^\[0:v\][^;]*fps=60\[page0\];\[4:v\]format=yuva444p,setpts=PTS-STARTPTS\+0\.5\/TB\[caption0\];/)
+  assert.match(script, /\[page0\]\[caption0\]overlay=x=10:y=20:eof_action=pass:format=yuv444:enable='between\(t,0\.5,1\.5\)'\[page1\]/)
+  assert.match(script, /\[5:v\][^;]*\+2\/TB\[caption1\];\[page1\]\[caption1\]overlay=x=30:y=40:[^;]*'between\(t,2,3\.25\)'\[video0\]/)
+  assert.ok(script.indexOf('[video0]') < script.indexOf('[click0]'))
+  assert.match(script, /\[3:a:0\]/)
+})
+
+test('shows a caption only while its line is spoken', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'traceframe-caption-'))
+  try {
+    const width = 160, height = 120, fps = 30
+    const rawPath = join(directory, 'capture.mkv'), image = join(directory, 'caption.png'), white = join(directory, 'white.jpg')
+    await runCommand('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', `color=c=white:s=${width}x${height}`, '-frames:v', '1', white])
+    await runCommand('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=40x20', '-frames:v', '1', image])
+    const capture = createJpegCapture(rawPath, { width, height, fps, onError: assert.fail })
+    await capture.append({ data: await readFile(white), timestamp: 1000 })
+    await capture.stop(1900)
+    const output = join(directory, 'output.mp4')
+    await renderVideo({ rawPath, directory, ffmpeg: await probeFfmpeg(),
+      trace: { initialPointer: { x: 150, y: 110 }, moves: [], clicks: [], end: 0.9 },
+      config: { video: { width, height, fps }, scale: 1, postRoll: 0, output },
+      captions: [{ path: image, start: 0.3, end: 0.6, x: 30, y: 40 }],
+    })
+    const pixels = join(directory, 'pixels.gray')
+    await runCommand('ffmpeg', ['-v', 'error', '-i', output, '-pix_fmt', 'gray', '-f', 'rawvideo', pixels])
+    const frames = await readFile(pixels)
+    const inside = (frame) => frames[frame * width * height + 50 * width + 50]
+    const shown = Array.from({ length: frames.length / (width * height) }, (_, frame) => inside(frame) < 30)
+    assert.deepEqual(shown.map((dark, frame) => dark ? frame : -1).filter((frame) => frame >= 0), [9, 10, 11, 12, 13, 14, 15, 16, 17, 18])
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
 test('full-range Chrome JPEGs retain gray levels and match limited-range input under overlays', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'traceframe-levels-'))
   try {

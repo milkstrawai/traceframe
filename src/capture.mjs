@@ -19,7 +19,7 @@ const FAILURE_SCREENSHOT_TIMEOUT = 5_000
 // a busy machine captured fewer pictures without saving any work.
 const SCREENCAST_FPS = 60
 
-export async function captureFlow({ config, flow, directory, page, signal: callerSignal }) {
+export async function captureFlow({ config, flow, directory, page, narration, signal: callerSignal }) {
   const captureErrors = new AbortController()
   const signal = callerSignal ? AbortSignal.any([callerSignal, captureErrors.signal]) : captureErrors.signal
   const files = runFiles(directory)
@@ -93,7 +93,7 @@ export async function captureFlow({ config, flow, directory, page, signal: calle
     }
     try {
       await withDeadline(
-        (flowSignal) => flow.run({ page, signal: flowSignal, ...createFlowApi({ page, trace, clock, viewport: config.viewport, signal: flowSignal }) }),
+        (flowSignal) => flow.run({ page, signal: flowSignal, ...createFlowApi({ page, trace, clock, viewport: config.viewport, signal: flowSignal, narration }) }),
         config.flowTimeout * 1000,
         new TraceframeError(`Flow exceeded the ${config.flowTimeout}-second flow timeout. Raise it with the flowTimeout option, or --flow-timeout.`, { code: 'FLOW_TOO_LONG' }),
         signal,

@@ -12,24 +12,25 @@ const ASSETS = join(import.meta.dirname, 'assets')
 const CURSOR_HOTSPOT = { x: 6.6, y: 1.6 }
 const CLICK = { duration: 0.24, scaleStart: 0.7, scaleEnd: 1.25 }
 
-export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, signal, audio }) {
+export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, signal, audio, captions = [] }) {
   const { fps } = config.video
   const outputDuration = Math.max(1 / fps, trace.end + config.postRoll, ...trace.clicks.map((click) => click.at + CLICK.duration))
   if (audio && audio.offset >= outputDuration) {
     throw new TraceframeError(`Audio offset ${audio.offset} seconds starts at or after the video's end (${number(outputDuration)} seconds). Reduce its offset.`, { code: 'AUDIO_OUTSIDE_VIDEO' })
   }
   const filterPath = runFiles(directory).filter
-  await writeFile(filterPath, buildFilterScript({ trace, scale: config.scale, fps, audio, overlayEofAction: ffmpeg.overlayEofAction }))
+  await writeFile(filterPath, buildFilterScript({ trace, scale: config.scale, fps, audio, captions, overlayEofAction: ffmpeg.overlayEofAction }))
   const outputTemp = join(dirname(config.output), `.traceframe-${randomUUID()}.tmp.mp4`)
   const inputs = {
     capture: ['-i', rawPath],
     cursor: ['-loop', '1', '-framerate', String(fps), '-i', join(ASSETS, `cursor-${config.scale}x.png`)],
     pulse: ['-loop', '1', '-framerate', String(fps), '-t', String(CLICK.duration + 1 / fps), '-i', join(ASSETS, `click-pulse-${config.scale}x.png`)],
     audio: ['-i', audio?.path],
+    ...Object.fromEntries(captions.map((caption, index) => [`caption${index}`, ['-loop', '1', '-framerate', String(fps), '-t', String(number(caption.end - caption.start + 1 / fps)), '-i', caption.path]])),
   }
   const args = [
     '-y', '-hide_banner', '-loglevel', 'error',
-    ...Object.keys(inputIndices(trace, audio)).flatMap((name) => inputs[name]),
+    ...Object.keys(inputIndices(trace, audio, captions)).flatMap((name) => inputs[name]),
     ffmpeg.filterComplexFileOption, filterPath,
     '-map', '[final]',
   ]
@@ -57,11 +58,12 @@ export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, s
   }
 }
 
-// Event times are seconds from the first frame of the raw video.
-export function buildFilterScript({ trace, scale, fps, audio, overlayEofAction }) {
+// Event times are seconds from the first frame of the raw video. Captions ({ path, start, end, x, y }) are images
+// placed in video pixels, drawn over the page and under the click pulses and cursor.
+export function buildFilterScript({ trace, scale, fps, audio, captions = [], overlayEofAction }) {
   const { clicks, moves } = trace
-  const input = inputIndices(trace, audio)
-  const animatedOverlays = clicks.length > 0 || moves.length > 0
+  const input = inputIndices(trace, audio, captions)
+  const animatedOverlays = clicks.length > 0 || moves.length > 0 || captions.length > 0
   // Repeat the last picture and resample to the output rate. The padding also covers a sub-frame take or final rounding.
   // Animated overlays need every output tick, even on a static page, so the cadence comes first. With stationary
   // overlays, it comes last, so they are composited before identical frames are duplicated.
@@ -72,7 +74,16 @@ export function buildFilterScript({ trace, scale, fps, audio, overlayEofAction }
   // Chrome JPEGs are full range; normalize before compositing limited-range overlays.
   // Convert to the overlay format before duplicating frames. Converting afterward
   // can queue a full-size buffer for every repeated frame in a long static gap.
-  const filters = [`[${input.capture}:v]scale=out_range=tv,format=yuv420p,format=yuv444p,setpts=PTS-STARTPTS${animatedOverlays ? ',' + cadence : ''}[video0]`]
+  // Captions go over the page, from [page0] to [video0], before the click pulses and cursor.
+  const page = (index) => (index < captions.length ? `page${index}` : 'video0')
+  const filters = [`[${input.capture}:v]scale=out_range=tv,format=yuv420p,format=yuv444p,setpts=PTS-STARTPTS${animatedOverlays ? ',' + cadence : ''}[${page(0)}]`]
+  captions.forEach((caption, index) => {
+    const start = number(caption.start)
+    filters.push(
+      `[${input[`caption${index}`]}:v]format=yuva444p,setpts=PTS-STARTPTS+${start}/TB[caption${index}]`,
+      `[${page(index)}][caption${index}]overlay=x=${caption.x}:y=${caption.y}:${overlay}:enable='between(t,${start},${number(caption.end)})'[${page(index + 1)}]`,
+    )
+  })
   if (clicks.length) filters.push(`[${input.pulse}:v]format=rgba,split=${clicks.length}${clicks.map((_, index) => `[pulse${index}]`).join('')}`)
   clicks.forEach((click, index) => filters.push(...clickFilter(click, index, scale, overlay)))
 
@@ -103,9 +114,9 @@ export function buildFilterScript({ trace, scale, fps, audio, overlayEofAction }
   return filters.join(';')
 }
 
-// FFmpeg numbers its inputs in this order; the click pulse and the audio are added only when used.
-function inputIndices(trace, audio) {
-  const names = ['capture', 'cursor', ...(trace.clicks.length ? ['pulse'] : []), ...(audio ? ['audio'] : [])]
+// FFmpeg numbers its inputs in this order; the click pulse, the audio and the captions are added only when used.
+function inputIndices(trace, audio, captions) {
+  const names = ['capture', 'cursor', ...(trace.clicks.length ? ['pulse'] : []), ...(audio ? ['audio'] : []), ...captions.map((_, index) => `caption${index}`)]
   return Object.fromEntries(names.map((name, index) => [name, index]))
 }
 

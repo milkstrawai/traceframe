@@ -1,7 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises'
 import { pathToFileURL } from 'node:url'
 
-import { easeOutCubic } from './easing.mjs'
+import { easePoint } from './easing.mjs'
 import { TraceframeError } from './errors.mjs'
 
 export const LIMITS = {
@@ -9,8 +9,8 @@ export const LIMITS = {
   maxClicks: 100,
   maxActionDuration: 30,
 }
-const MOVE_SECONDS = 0.5
-const DWELL_SECONDS = 0.25
+export const MOVE_SECONDS = 0.5
+export const DWELL_SECONDS = 0.25
 // People hold a mouse button for about 100 ms, long enough for press styles such as :active to show.
 const PRESS_HOLD_MS = 100
 const MOVE_SAMPLE_MS = 1000 / 30
@@ -23,30 +23,39 @@ export async function loadFlow(path, viewport) {
     throw new TraceframeError(`Could not load flow: ${path}: ${error instanceof Error ? error.message : error}`, { code: 'INVALID_FLOW', cause: error })
   }
   if (typeof module.default !== 'function') throw new TraceframeError('Flow must export a default function.', { code: 'INVALID_FLOW' })
-  return { ...createFlow(module.default, viewport, module.initialPointer), ready: module.ready }
+  return { ...createFlow(module.default, viewport, module.initialPointer, module.voice), ready: module.ready }
 }
 
-export function createFlow(run, viewport, initialPointer) {
+export function createFlow(run, viewport, initialPointer, voice) {
   if (typeof run !== 'function') throw new TraceframeError('Flow must be a function.', { code: 'INVALID_FLOW' })
   const { x, y } = initialPointer ?? { x: Math.round(viewport.width / 4), y: Math.max(0, viewport.height - 80) }
   if (!insideViewport({ x, y }, viewport)) {
     throw new TraceframeError('Flow initialPointer must be a point inside the viewport.', { code: 'INVALID_FLOW' })
   }
-  return { run, initialPointer: { x, y } }
+  return { run, initialPointer: { x, y }, voice: voiceSettings(voice) }
+}
+
+function voiceSettings(voice) {
+  if (voice === undefined || voice === false) return undefined
+  if (voice === true) return { captions: true }
+  if (typeof voice?.captions === 'boolean') return { captions: voice.captions }
+  throw new TraceframeError('Flow voice must be true, false or { captions: true | false }.', { code: 'INVALID_FLOW' })
 }
 
 // The pointer timeline that render.mjs draws. Flow helpers add moves ({ at, duration, from, to }) and clicks
 // ({ at, point }), and the capture sets `end` when the flow returns. Times are seconds from `clock`, the epoch
-// milliseconds of the first video frame.
+// milliseconds of the first video frame. Targets ({ at, box }) are the elements the pointer sets off for, which
+// captions keep clear of; one without a box, from move() or scroll(), ends the one before.
 export function createTrace(initialPointer) {
-  return { initialPointer, moves: [], clicks: [] }
+  return { initialPointer, moves: [], clicks: [], targets: [] }
 }
 
 export function secondsSince(clock) {
   return (Date.now() - clock) / 1000
 }
 
-export function createFlowApi({ page, trace, clock, viewport, signal }) {
+// With `narration` (narration.mjs), the helpers include say().
+export function createFlowApi({ page, trace, clock, viewport, signal, narration }) {
   let pointer = trace.initialPointer
   const sleep = (milliseconds) => delay(milliseconds, undefined, { signal })
 
@@ -64,9 +73,9 @@ export function createFlowApi({ page, trace, clock, viewport, signal }) {
     while (elapsed < total) {
       await sleep(Math.min(MOVE_SAMPLE_MS, total - elapsed))
       elapsed = Math.min(total, performance.now() - startedAt)
-      const eased = easeOutCubic(elapsed / total)
+      const { x, y } = easePoint(from, to, elapsed / total)
       signal?.throwIfAborted()
-      await page.mouse.move(from.x + (to.x - from.x) * eased, from.y + (to.y - from.y) * eased)
+      await page.mouse.move(x, y)
     }
     pointer = to
   }
@@ -74,8 +83,12 @@ export function createFlowApi({ page, trace, clock, viewport, signal }) {
   const moveTo = async (locator, duration, name, handles) => {
     const seconds = durationSeconds(duration ?? MOVE_SECONDS, `${name} duration`)
     const target = await findTarget(locator, signal, handles)
+    const at = secondsSince(clock)
     // A person does not chase a target that shifts under a pointer already on it.
-    if (pointInsideBox(pointer, target.box)) return pointer
+    if (pointInsideBox(pointer, target.box)) {
+      trace.targets.push({ at, box: target.box })
+      return pointer
+    }
     let point = await aimPoint(target)
     if (!insideViewport(point, viewport)) {
       const aim = await reveal(target.element, locator, signal, handles)
@@ -87,54 +100,69 @@ export function createFlowApi({ page, trace, clock, viewport, signal }) {
     if (!after || !pointInsideBox(point, after)) {
       throw new TraceframeError(`${locator} moved while the pointer was arriving.`, { code: 'FLOW_TARGET_MOVED' })
     }
+    trace.targets.push({ at, box: after })
     return point
   }
+
+  // click(), which say() also uses with `line`: it waits for `line.beforePress` after the dwell, does not press once
+  // `line.signal` aborts, and returns when it pressed.
+  const press = withHandles(async (handles, locator, options = {}, line = {}) => {
+    assertBelowLimit(trace.clicks, LIMITS.maxClicks, 'click')
+    const dwell = durationSeconds(options.dwell ?? DWELL_SECONDS, 'click dwell', { allowZero: true })
+    const point = await moveTo(locator, options.duration, 'click', handles)
+    await sleep(dwell * 1000)
+    await line.beforePress?.()
+    // Hold on to this element: a control may rename or hide itself once it is pressed.
+    const element = await locator.elementHandle({ signal })
+    handles.push(element)
+    await element.waitForElementState('enabled', { signal }).catch((error) => {
+      throw fromTimeout(error, `${locator} stayed disabled.`, 'FLOW_TARGET_DISABLED')
+    })
+    await assertReceivesPointer(element, locator, point, handles)
+    const at = secondsSince(clock)
+    signal?.throwIfAborted()
+    line.signal?.throwIfAborted()
+    await page.mouse.down()
+    try {
+      await sleep(PRESS_HOLD_MS)
+      // A press style such as :active { scale: 0.95 } can shrink the target out from under a pointer near its edge.
+      // A target that disappears when pressed, such as an option that closes its list, has already taken the press.
+      const pressed = await element.boundingBox()
+      if (pressed && !pointInsideBox(point, pressed)) {
+        throw new TraceframeError(`${locator} moved away from the pointer when pressed. Click nearer its center.`, { code: 'FLOW_TARGET_MOVED' })
+      }
+    } finally {
+      await page.mouse.up()
+    }
+    trace.clicks.push({ at, point })
+    return at
+  })
 
   return {
     hover: withHandles(async (handles, locator, options = {}) => {
       await moveTo(locator, options.duration, 'hover', handles)
     }),
-    click: withHandles(async (handles, locator, options = {}) => {
-      assertBelowLimit(trace.clicks, LIMITS.maxClicks, 'click')
-      const dwell = durationSeconds(options.dwell ?? DWELL_SECONDS, 'click dwell', { allowZero: true })
-      const point = await moveTo(locator, options.duration, 'click', handles)
-      await sleep(dwell * 1000)
-      // Hold on to this element: a control may rename or hide itself once it is pressed.
-      const element = await locator.elementHandle({ signal })
-      handles.push(element)
-      await element.waitForElementState('enabled', { signal }).catch((error) => {
-        throw fromTimeout(error, `${locator} stayed disabled.`, 'FLOW_TARGET_DISABLED')
-      })
-      await assertReceivesPointer(element, locator, point, handles)
-      const at = secondsSince(clock)
-      signal?.throwIfAborted()
-      await page.mouse.down()
-      try {
-        await sleep(PRESS_HOLD_MS)
-        // A press style such as :active { scale: 0.95 } can shrink the target out from under a pointer near its edge.
-        // A target that disappears when pressed, such as an option that closes its list, has already taken the press.
-        const pressed = await element.boundingBox()
-        if (pressed && !pointInsideBox(point, pressed)) {
-          throw new TraceframeError(`${locator} moved away from the pointer when pressed. Click nearer its center.`, { code: 'FLOW_TARGET_MOVED' })
-        }
-      } finally {
-        await page.mouse.up()
-      }
-      trace.clicks.push({ at, point })
-    }),
+    async click(locator, options) {
+      await press(locator, options)
+    },
     async move(point, options = {}) {
       if (!insideViewport(point, viewport)) {
         throw new TraceframeError('move requires an { x, y } point inside the viewport.', { code: 'INVALID_FLOW' })
       }
+      trace.targets.push({ at: secondsSince(clock) })
       await movePointer(point, durationSeconds(options.duration ?? MOVE_SECONDS, 'move duration'))
     },
     scroll: withHandles(async (handles, locator) => {
+      trace.targets.push({ at: secondsSince(clock) })
       const { shown } = await reveal((await findTarget(locator, signal, handles)).element, locator, signal, handles)
       if (!shown) throw new TraceframeError(`${locator} could not be revealed by scrolling.`, { code: 'FLOW_TARGET_OUTSIDE_VIEWPORT' })
     }),
     async wait(seconds) {
       await sleep(durationSeconds(seconds, 'wait', { allowZero: true }) * 1000)
     },
+    say: narration?.narrator({ clock, signal, click: press }) ?? (async () => {
+      throw new TraceframeError('say() needs voice: export voice = true from the flow file, or pass voice: true to recordPage.', { code: 'INVALID_FLOW' })
+    }),
   }
 }
 

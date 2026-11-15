@@ -7,6 +7,7 @@ import { DEFAULTS, PRESETS } from './config.mjs'
 import { LIMITS } from './flow.mjs'
 import { formatFailure } from './diagnostics.mjs'
 import { record } from './record.mjs'
+import { PHONON_VERSION } from './voice.mjs'
 
 const { version: VERSION } = createRequire(import.meta.url)('../package.json')
 const SIGNAL_EXIT_CODES = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 }
@@ -29,7 +30,7 @@ const OPTIONS = {
   'post-roll': { key: 'postRoll', type: Number, value: '<seconds>', help: `Tail after the flow (default: ${DEFAULTS.postRoll})` },
   'ready-timeout': { key: 'readyTimeout', type: Number, value: '<seconds>', help: `Playwright default timeout during navigation and ready() (default: ${DEFAULTS.readyTimeout})` },
   'flow-timeout': { key: 'flowTimeout', type: Number, value: '<seconds>', help: `Time limit for the flow, including waits (default: ${DEFAULTS.flowTimeout})` },
-  'run-dir': { key: 'runDirectory', value: '<path>', help: 'Keep the raw capture, failure screenshot and FFmpeg filter' },
+  'run-dir': { key: 'runDirectory', value: '<path>', help: 'Keep the raw capture, narration and other run files' },
   audio: { key: 'audio', value: '<path>', help: 'Add an external audio file (AAC stereo in the MP4)' },
   'audio-offset': { key: 'audioOffset', type: Number, value: '<seconds>', help: `Audio start in the video; negative trims its start (default: ${DEFAULTS.audioOffset})` },
 }
@@ -51,8 +52,10 @@ ${OPTION_HELP.join('\n')}
 The flow module must export a default function. It may also export
 ready({ page, signal }) to establish state before capture and initialPointer
 { x, y } to set where the cursor starts.
-The flow helpers are move(), hover(), click(), scroll(), and wait(). A flow
-may contain at most ${LIMITS.maxMoves} move events and ${LIMITS.maxClicks} click events.
+The flow helpers are move(), hover(), click(), scroll(), wait(), and say().
+Export voice = true to speak and caption each say() line; voice needs
+\`npm install -D phonon-tts@${PHONON_VERSION}\`. A flow may contain at most
+${LIMITS.maxMoves} move events and ${LIMITS.maxClicks} click events.
 Each duration, dwell, and wait is at most ${LIMITS.maxActionDuration} seconds.
 `
 

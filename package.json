@@ -45,5 +45,8 @@
   "license": "MIT",
   "publishConfig": {
     "access": "public"
+  },
+  "devDependencies": {
+    "phonon-tts": "0.7.1"
   }
 }

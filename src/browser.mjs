@@ -28,11 +28,7 @@ export async function launchBrowser(config, { handleSignals, signal }) {
         handleSIGHUP: handleSignals,
       })
     } catch (error) {
-      if (!/Executable doesn't exist/i.test(error.message)) throw error
-      const message = config.browser
-        ? `Configured browser executable is unavailable: ${config.browser}`
-        : `Playwright Chromium is not installed. Run \`npx playwright@${PLAYWRIGHT_VERSION} install --only-shell chromium\`, or pass --browser to a Chrome executable.`
-      throw new TraceframeError(message, { code: 'PLAYWRIGHT_RUNTIME_MISSING', cause: error })
+      throw missingBrowserError(error, config.browser) ?? error
     }
   }
 
@@ -48,6 +44,15 @@ export async function launchBrowser(config, { handleSignals, signal }) {
   // The launch or check may have stopped because the caller cancelled.
   signal.throwIfAborted()
   return { browser: await launch(softwareArgs), graphics: { hardwareAccelerated: false, fallbackReason } }
+}
+
+// Playwright's error for a missing browser executable, as one that says what to install; undefined for other errors.
+export function missingBrowserError(error, executablePath) {
+  if (!/Executable doesn't exist/i.test(error.message)) return undefined
+  const message = executablePath
+    ? `Configured browser executable is unavailable: ${executablePath}`
+    : `Playwright Chromium is not installed. Run \`npx playwright@${PLAYWRIGHT_VERSION} install --only-shell chromium\`, or pass --browser to a Chrome executable.`
+  return new TraceframeError(message, { code: 'PLAYWRIGHT_RUNTIME_MISSING', cause: error })
 }
 
 // Returns the GPU renderer when hardware rendering is verified, otherwise why it was not.

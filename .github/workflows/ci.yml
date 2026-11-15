@@ -35,6 +35,14 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps --only-shell chromium
 
+      # The voice tests download the voice model on first use; keep it between runs.
+      - name: Cache the voice model
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/traceframe
+          key: voice-model-${{ hashFiles('src/voice.mjs') }}
+          restore-keys: voice-model-
+
       - name: Install FFmpeg on Linux
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install --yes ffmpeg

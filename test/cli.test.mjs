@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 const cli = fileURLToPath(new URL('../src/cli.mjs', import.meta.url))
-const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+const { version, devDependencies } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 const flowArgs = ['--url', 'file:///tmp/page.html', '--flow', fileURLToPath(new URL('../examples/fixture-flow.mjs', import.meta.url))]
 
 async function run(...args) {
@@ -46,7 +46,7 @@ Options:
   --post-roll <seconds>        Tail after the flow (default: 0.3)
   --ready-timeout <seconds>    Playwright default timeout during navigation and ready() (default: 30)
   --flow-timeout <seconds>     Time limit for the flow, including waits (default: 120)
-  --run-dir <path>             Keep the raw capture, failure screenshot and FFmpeg filter
+  --run-dir <path>             Keep the raw capture, narration and other run files
   --audio <path>               Add an external audio file (AAC stereo in the MP4)
   --audio-offset <seconds>     Audio start in the video; negative trims its start (default: 0)
   -h, --help                   Show this help
@@ -55,8 +55,10 @@ Options:
 The flow module must export a default function. It may also export
 ready({ page, signal }) to establish state before capture and initialPointer
 { x, y } to set where the cursor starts.
-The flow helpers are move(), hover(), click(), scroll(), and wait(). A flow
-may contain at most 100 move events and 100 click events.
+The flow helpers are move(), hover(), click(), scroll(), wait(), and say().
+Export voice = true to speak and caption each say() line; voice needs
+\`npm install -D phonon-tts@${devDependencies['phonon-tts']}\`. A flow may contain at most
+100 move events and 100 click events.
 Each duration, dwell, and wait is at most 30 seconds.
 ` })
 })
