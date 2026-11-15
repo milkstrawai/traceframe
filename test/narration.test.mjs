@@ -159,6 +159,8 @@ test('lays the lines out on one track and places each caption', async () => {
     assert.deepEqual(drawn, { texts: ['One.', 'Two.', 'Three.'], viewport, scale: 2, paths: captions.map((caption) => caption.path) })
     assert.deepEqual(captions.map(({ x, y }) => ({ x, y })), [{ x: 752, y: 1382 }, { x: 952, y: 1382 }, { x: 952, y: 16 }])
     assert.ok(captions.every(({ start, end }) => Math.abs(end - start - 0.5) < 1e-9))
+    // The track says when each line is spoken, for turning other audio down under it.
+    assert.deepEqual(audio.spoken, captions.map(({ start, end }) => ({ start, end })))
     // Each line is loud where it was placed and the track is quiet between the lines.
     const pcm = join(directory, 'narration.pcm')
     await runCommand('ffmpeg', ['-v', 'error', '-i', audio.path, '-ac', '1', '-ar', String(RATE), '-f', 's16le', pcm])

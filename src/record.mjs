@@ -38,7 +38,6 @@ export async function recordPage(options = {}) {
 }
 
 async function recordFlow({ config, flow, signal, page }) {
-  if (flow.voice && config.audio) throw new TraceframeError('A narrated flow cannot also add audio.', { code: 'INVALID_CONFIG' })
   const ffmpeg = await probeFfmpeg({ audio: Boolean(config.audio || flow.voice) })
   let audio = typeof config.audio === 'function' ? undefined : config.audio
   if (audio) await probeAudio(audio.path, signal)
@@ -54,16 +53,16 @@ async function recordFlow({ config, flow, signal, page }) {
     if (flow.voice) narration = await startVoice({ executablePath: config.browser ?? process.env.CHROME_PATH, signal })
     capture = await captureFlow({ config, flow, directory, signal, page, narration })
     const { rawPath, trace } = capture
-    const narrated = narration ? await narration.finish({ directory, trace, viewport: config.viewport, scale: config.scale, captions: flow.voice.captions, signal }) : {}
-    await narration?.close()
-    audio ??= narrated.audio
+    // Before the narration is written, so audio returned at its path is refused rather than overwritten.
     if (typeof config.audio === 'function') {
       signal?.throwIfAborted()
       audio = createAudioConfig(await config.audio({ startedAt: capture.startedAt, signal }), config.output, directory)
       if (!audio) throw new TraceframeError('The audio function must return { path, offset }.', { code: 'INVALID_CONFIG' })
       await probeAudio(audio.path, signal)
     }
-    const duration = await renderVideo({ rawPath, trace, directory, config, ffmpeg, signal, audio, captions: narrated.captions })
+    const narrated = narration ? await narration.finish({ directory, trace, viewport: config.viewport, scale: config.scale, captions: flow.voice.captions, signal }) : {}
+    await narration?.close()
+    const duration = await renderVideo({ rawPath, trace, directory, config, ffmpeg, signal, audio, narration: narrated.audio, captions: narrated.captions })
     return {
       output: config.output,
       width: config.video.width,
@@ -75,7 +74,7 @@ async function recordFlow({ config, flow, signal, page }) {
       ...(narration ? { lineCount: narration.lines.length } : {}),
       ...(capture.graphics ? { graphics: capture.graphics } : {}),
       runDirectory: config.runDirectory,
-      ...(audio ? { audio: true } : {}),
+      ...(audio || narrated.audio ? { audio: true } : {}),
       ...(capture.captureStats ? { captureStats: capture.captureStats } : {}),
     }
   } catch (error) {

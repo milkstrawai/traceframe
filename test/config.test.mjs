@@ -90,7 +90,7 @@ test('both recording paths normalize external audio with an explicit offset', ()
       assert.throws(() => configure({ audio: invalid }), { code: 'INVALID_CONFIG' })
     }
     assert.throws(() => configure({ output: 'same.mp4', audio: { path: 'same.mp4' } }), /different paths/)
-    for (const name of ['capture.mkv', 'capture.webm', 'render.filter', 'failure.png']) {
+    for (const name of ['capture.mkv', 'capture.webm', 'render.filter', 'failure.png', 'narration.wav']) {
       assert.throws(() => configure({ runDirectory: 'take', audio: { path: `take/${name}` } }), /reserved recording file/)
     }
   }
@@ -98,7 +98,7 @@ test('both recording paths normalize external audio with an explicit offset', ()
 
 test('callback audio cannot use a reserved file in a relative temporary directory', () => {
   // record() checks callback audio against its temporary directory, which is relative when TMPDIR is.
-  for (const name of ['capture.mkv', 'capture.webm', 'render.filter', 'failure.png']) {
+  for (const name of ['capture.mkv', 'capture.webm', 'render.filter', 'failure.png', 'narration.wav']) {
     assert.throws(() => createAudioConfig({ path: `traceframe-take/${name}` }, resolve('video.mp4'), 'traceframe-take'), /reserved recording file/)
   }
 })

@@ -63,6 +63,43 @@ test('shows a caption only while its line is spoken', async () => {
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
+test('turns the audio down under the narration while its lines are spoken', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'traceframe-duck-'))
+  try {
+    const width = 160, height = 120, fps = 30, rate = 8000
+    const rawPath = join(directory, 'capture.mkv'), white = join(directory, 'white.jpg')
+    await runCommand('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', `color=c=white:s=${width}x${height}`, '-frames:v', '1', white])
+    const capture = createJpegCapture(rawPath, { width, height, fps, onError: assert.fail })
+    await capture.append({ data: await readFile(white), timestamp: 1000 })
+    await capture.stop(5000)
+    // A steady tone that starts half a second in, under a silent narration, so the tone's level is all there is.
+    const tone = join(directory, 'tone.wav'), narration = join(directory, 'narration.wav')
+    await runCommand('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=5', tone])
+    await runCommand('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=mono', '-t', '3', narration])
+    const output = join(directory, 'output.mp4')
+    await renderVideo({ rawPath, directory, ffmpeg: await probeFfmpeg({ audio: true }),
+      trace: { initialPointer: { x: 150, y: 110 }, moves: [], clicks: [], end: 4 },
+      config: { video: { width, height, fps }, scale: 1, postRoll: 0, output },
+      audio: { path: tone, offset: 0.5 },
+      // Two lines half a second apart, then one more after a long pause.
+      narration: { path: narration, spoken: [{ start: 1, end: 1.5 }, { start: 2, end: 2.4 }, { start: 3.4, end: 3.6 }] },
+    })
+    const pcm = join(directory, 'output.pcm')
+    await runCommand('ffmpeg', ['-v', 'error', '-i', output, '-ac', '1', '-ar', String(rate), '-f', 's16le', pcm])
+    const samples = new Int16Array((await readFile(pcm)).buffer)
+    const level = (from, to) => Math.sqrt(samples.subarray(from * rate, to * rate).reduce((sum, value) => sum + value * value, 0) / ((to - from) * rate))
+    const full = level(0.55, 0.75)
+    assert.ok(full > 1000, `tone at ${full}`)
+    assert.ok(level(0.1, 0.4) < 10)
+    // Down through both lines and the short gap between them, back up after, and down again for the last line.
+    for (const [from, to] of [[1.05, 1.45], [1.55, 1.95], [2.05, 2.35], [3.45, 3.55]]) {
+      assert.ok(Math.abs(level(from, to) / full - 0.25) < 0.03, `${level(from, to) / full} of full from ${from} to ${to} s`)
+    }
+    assert.ok(Math.abs(level(2.65, 3.15) / full - 1) < 0.05)
+    assert.ok(Math.abs(level(3.85, 4) / full - 1) < 0.05)
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
 test('full-range Chrome JPEGs retain gray levels and match limited-range input under overlays', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'traceframe-levels-'))
   try {

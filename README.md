@@ -2,7 +2,7 @@
 
 Traceframe records a scripted Chromium flow and renders an MP4 with a smooth cursor and click pulse. Everything runs locally: pages, flows, videos, and authentication state stay on your machine.
 
-Browser capture is silent by default. A flow can [narrate itself](#add-a-voice-over) with a local text-to-speech model, or you can add an [external audio file](#add-audio) with explicit timing; tab audio and microphones are not captured automatically.
+Browser capture is silent by default. A flow can [narrate itself](#add-a-voice-over) with a local text-to-speech model, and you can add an [external audio file](#add-audio) with explicit timing, such as a recording of the page's sound; tab audio and microphones are not captured automatically.
 
 https://github.com/user-attachments/assets/38e02cd5-a9ba-4f3c-938c-159955353141
 
@@ -171,7 +171,9 @@ Phonon reads numbers and common abbreviations; if it says a name wrongly, spell 
 
 Each caption shows while its line is spoken, in the [recording guide's caption style](docs/recording-flows.md#add-captions-and-reading-time). It sits at the bottom, unless there it would cover the element the pointer is using or heading for, or the moving pointer, and the top would cover less. It cannot see what appears on its own, such as a toast; use `caption: 'top'` for that line. A long line gets smaller type; one too long to fit even then stops the recording with `INVALID_FLOW`. To turn captions off, export `voice = { captions: false }`.
 
-With `recordPage`, pass `voice: true` or `voice: { captions: false }`; voice uses Playwright's Chromium, or `CHROME_PATH` when set. A narrated flow cannot also take `audio`. The summary includes `lineCount`, and `audio: true` once a line was spoken.
+With `recordPage`, pass `voice: true` or `voice: { captions: false }`; voice uses Playwright's Chromium, or `CHROME_PATH` when set. The summary includes `lineCount`, and `audio: true` once a line was spoken.
+
+With [`audio`](#add-audio) as well, such as the page's own sound, the narration plays over it. The audio is turned down by 12 dB while each line is spoken, and stays down between lines less than a second apart.
 
 Without `phonon-tts`, or with another version of it, Traceframe stops before recording with `VOICE_RUNTIME_MISSING` and the install command. With `npx`, install it in the project you run from; with a global Traceframe, install it globally. A failed model download or speech failure stops with `VOICE_FAILED`.
 
@@ -240,11 +242,11 @@ npx @milkstraw/traceframe record --url http://localhost:3000 --flow ./flow.mjs \
   --audio .traceframe/sound.wav --audio-offset 0.5 --out .traceframe/demo.mp4
 ```
 
-`offset` is seconds from the first video frame to the first audio sample. Positive values add leading silence; negative values discard the beginning of the audio (in the CLI, use e.g. `--audio-offset=-0.25`). The default is 0. Short audio is padded with silence, and longer audio is trimmed to the video's end. Nothing is looped or stretched. The first audio stream is encoded as stereo AAC at 48 kHz, 192 kb/s; system FFmpeg must provide its standard `aac` encoder. Successful summaries include `audio: true`.
+`offset` is seconds from the first video frame to the first audio sample. Positive values add leading silence; negative values discard the beginning of the audio (in the CLI, use e.g. `--audio-offset=-0.25`). The default is 0. Short audio is padded with silence, and longer audio is trimmed to the video's end. Nothing is looped or stretched. The first audio stream is encoded as stereo AAC at 48 kHz, 192 kb/s; system FFmpeg must provide its standard `aac` encoder. Successful summaries include `audio: true`. Under a [voice-over](#add-a-voice-over), the audio is turned down while each line is spoken.
 
 The input must be a local file, such as WAV, MP3, M4A or audio WebM. Static inputs are checked before browser recording, so a missing file or missing audio stream cannot waste a take (`AUDIO_INVALID`). After capture, an audio start at or after the video's end rejects with `AUDIO_OUTSIDE_VIDEO`. A negative offset that discards the entire source produces a silent audio track.
 
-Traceframe reads the file without modifying or deleting it; use an input path different from the output and the reserved files in `runDirectory` (`capture.mkv`, legacy `capture.webm`, `render.filter`, `failure.png`). Keep recordings in an ignored directory.
+Traceframe reads the file without modifying or deleting it; use an input path different from the output and the reserved files in `runDirectory` (`capture.mkv`, legacy `capture.webm`, `render.filter`, `failure.png`, `narration.wav`). Keep recordings in an ignored directory.
 
 For audio recorded alongside the flow, supply an async function instead. It runs once after successful capture and post-roll, before rendering, so it can finalize the external recorder and return its file. `startedAt` is the first video frame's timestamp in epoch milliseconds:
 
@@ -262,7 +264,7 @@ await recordPage({
 
 Here `finishAudioRecording` belongs to your script and reports the timestamp of its first recorded sample. Use timestamps on a shared clock, or determine the offset using an audiovisual marker. An offset corrects a constant alignment difference; it does not correct clock drift. Check markers near both ends of longer takes. See the [audio workflow](docs/recording-flows.md#align-external-audio).
 
-Your script owns the external recorder and its cleanup, including on flow failure or cancellation. The audio function is skipped if capture fails and must cooperate with `signal` when supplied. It may finish writing after capture; a static input must already exist before recording. Neither form captures browser or system sound by itself.
+Your script owns the external recorder and its cleanup, including on flow failure or cancellation. The audio function is skipped if capture fails and must cooperate with `signal` when supplied. It may finish writing after capture; a static input must already exist before recording. Neither form captures browser or system sound by itself; the recording guide shows [how to record the page's sound](docs/recording-flows.md#align-external-audio).
 
 ### Errors and cancellation
 

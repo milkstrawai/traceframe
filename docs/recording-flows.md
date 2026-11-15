@@ -234,6 +234,50 @@ Only paths saved for the current attempt are reported. A closed or unresponsive 
 
 Capture the application's actual processed output with your own audio recorder, then pass its local file through [`audio`](../README.md#add-audio). Use the same prepared page with `recordPage` when the audio setup needs a caller-owned context. Audio recording remains your script's responsibility; Traceframe aligns and encodes the supplied file in the final MP4.
 
+Playwright mutes Chromium when it runs headless, which is its default and how `record` and the CLI run it, so a recorder hears nothing from the page. To record the page's sound, launch the browser yourself with `ignoreDefaultArgs: ['--mute-audio']` and record with `recordPage`.
+
+On Linux with PipeWire, the default on current Ubuntu and Fedora, the page can play into a virtual speaker of its own. Other sounds stay out of the recording, the take plays silently, and no sound card is needed. Create the speaker once:
+
+```sh
+pw-cli create-node adapter '{ factory.name=support.null-audio-sink node.name=traceframe-sound node.description=Traceframe media.class=Audio/Sink object.linger=true audio.position=[FL FR] }'
+```
+
+Then send the browser's sound to it, and record it while the take runs:
+
+```js
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
+import { mkdir, rm } from 'node:fs/promises'
+import { chromium } from 'playwright'
+import { recordPage } from '@milkstraw/traceframe'
+
+const browser = await chromium.launch({ ignoreDefaultArgs: ['--mute-audio'], env: { ...process.env, PULSE_SINK: 'traceframe-sound' } })
+const page = await browser.newPage()
+// ...open and prepare the page, and write the flow...
+const sound = '.traceframe/sound.wav'
+await mkdir('.traceframe', { recursive: true })
+// Remove the last take's recording, so it cannot pass for this one.
+await rm(sound, { force: true })
+const recorder = spawn('pw-record', ['--target', 'traceframe-sound', '-P', '{ stream.capture.sink=true }', sound])
+const recorderStartedAt = Date.now()
+try {
+  await recordPage({
+    page, flow, output: '.traceframe/demo.mp4',
+    audio: async ({ startedAt }) => {
+      // pw-record runs until it is stopped, so one that already exited has failed.
+      if (!recorder.kill('SIGINT')) throw new Error('pw-record stopped before the take ended.')
+      await once(recorder, 'exit')
+      return { path: sound, offset: (recorderStartedAt - startedAt) / 1000 }
+    },
+  })
+} finally {
+  recorder.kill('SIGINT')
+  await browser.close()
+}
+```
+
+A recorder that stops before the take ends fails the take, and an earlier take's recording is never used. On the test machine, the sound landed about 25 ms after its picture; check yours with a marker, as below. Remove the speaker with `pw-cli destroy traceframe-sound`.
+
 Use a distinct sound and visible change as a synchronization marker. If the visible change lands at 2.00 seconds in the video and its sound starts at 2.08 seconds in the audio file, pass `offset: -0.08`. Measure on the actual recorded streams, accounting for capture-device and encoder latency. For a live recorder, the audio supplier's `startedAt` gives the video clock; the recorder's timestamp must refer to its first sample on a shared clock.
 
 Inspect the rendered result with audio enabled, and compare another marker near the end. If the difference grows, a constant offset is insufficient: correct the external recording's rate separately before adding it. Traceframe never changes audio speed or pitch. Trimmed audio ends with the video, including post-roll; shorter audio leaves silence. For independent takes, calculate alignment for each take and close the external recorder in your script's `finally` block.

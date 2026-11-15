@@ -1,6 +1,6 @@
 import test, { after, before } from 'node:test'
 import assert from 'node:assert/strict'
-import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -25,13 +25,13 @@ before(async () => {
 })
 after(() => rm(directory, { recursive: true, force: true }))
 
-async function narratedTake(name, voice) {
+async function narratedTake(name, voice, options) {
   const flow = join(directory, `${name}.mjs`)
   await writeFile(flow, flowSource(voice))
   const runDirectory = join(directory, `${name}-run`)
   const summary = await record({
     url: pathToFileURL(join(directory, 'page.html')).href, flow, output: join(directory, `${name}.mp4`),
-    preset: 'draft', viewportWidth: viewport.width, viewportHeight: viewport.height, runDirectory,
+    preset: 'draft', viewportWidth: viewport.width, viewportHeight: viewport.height, runDirectory, ...options,
   })
   return { summary, runDirectory, filter: await readFile(join(runDirectory, 'render.filter'), 'utf8') }
 }
@@ -89,8 +89,37 @@ test('narrates a page the caller opened', async () => {
   }
 })
 
-test('a narrated flow cannot also take audio', async () => {
-  const flow = join(directory, 'with-audio.mjs')
-  await writeFile(flow, flowSource(true))
-  await assert.rejects(record({ url: 'about:blank', flow, output: join(directory, 'with-audio.mp4'), audio: { path: join(directory, 'sound.wav') } }), { code: 'INVALID_CONFIG', message: /narrated flow/ })
+test('mixes the narration over audio, which is turned down while a line is spoken', async () => {
+  // A low hum, below the voice, so its level can be read under the speech. Like a recorder running alongside the
+  // take, it lasts as long as the take, however slow the machine.
+  const hum = join(directory, 'hum.wav')
+  let startedAt
+  const audio = async (clock) => {
+    startedAt = clock.startedAt
+    const seconds = (Date.now() - startedAt) / 1000 + 1
+    await runCommand('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', `sine=frequency=60:sample_rate=48000:duration=${seconds}`, hum])
+    return { path: hum, offset: 0 }
+  }
+  const { summary, filter } = await narratedTake('with-audio', true, { audio, postRoll: 1 })
+  assert.equal(summary.lineCount, 2)
+  assert.equal(summary.audio, true)
+  assert.ok(startedAt > 0)
+
+  const lines = [...filter.matchAll(/\[caption\d\]overlay=[^;]*between\(t,([\d.]+),([\d.]+)\)/g)].map((match) => [Number(match[1]), Number(match[2])])
+  const pcm = join(directory, 'hum.pcm')
+  await runCommand('ffmpeg', ['-v', 'error', '-i', summary.output, '-af', 'bandpass=f=60:width_type=h:width=20,bandpass=f=60:width_type=h:width=20', '-ac', '1', '-ar', '8000', '-f', 's16le', pcm])
+  const samples = new Int16Array((await readFile(pcm)).buffer)
+  const level = (from, to) => Math.sqrt(samples.subarray(Math.round(from * 8000), Math.round(to * 8000)).reduce((sum, value) => sum + value * value, 0) / ((to - from) * 8000))
+  const during = level(lines[0][0] + 0.3, lines[0][1] - 0.1)
+  const after = level(lines[1][1] + 0.3, summary.duration - 0.1)
+  assert.ok(after > 1000, `hum at ${after} after the last line, which ends at ${lines[1][1]} s of ${summary.duration} s`)
+  assert.ok(during / after < 0.4, `hum at ${during / after} of full during the first line`)
+})
+
+test('refuses audio at the narration\'s path before writing the narration over it', async () => {
+  const path = join(directory, 'reserved-run', 'narration.wav')
+  await mkdir(join(directory, 'reserved-run'))
+  await writeFile(path, 'the caller\'s recording')
+  await assert.rejects(narratedTake('reserved', true, { audio: async () => ({ path }) }), { code: 'INVALID_CONFIG', message: /reserved recording file/ })
+  assert.equal(await readFile(path, 'utf8'), 'the caller\'s recording')
 })

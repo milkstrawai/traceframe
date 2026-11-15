@@ -2,6 +2,7 @@ import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 
 import { captionY } from './captions.mjs'
+import { runFiles } from './config.mjs'
 import { raceAbort } from './deadline.mjs'
 import { TraceframeError } from './errors.mjs'
 import { runCommand } from './ffmpeg.mjs'
@@ -82,7 +83,9 @@ export function createNarration({ rate, speak, drawCaptions }) {
     if (!lines.length) return {}
     const track = new Float32Array(Math.max(...lines.map((line) => Math.round(line.start * rate) + line.samples.length)))
     for (const line of lines) track.set(line.samples, Math.round(line.start * rate))
-    const audio = { path: join(directory, 'narration.wav'), offset: 0 }
+    // Each line's start and end, for its caption and for turning other audio down under it.
+    const spoken = lines.map((line) => ({ start: line.start, end: line.start + line.samples.length / rate }))
+    const audio = { path: runFiles(directory).narration, spoken }
     await runCommand('ffmpeg', ['-v', 'error', '-y', '-f', 'f32le', '-ar', String(rate), '-ac', '1', '-i', 'pipe:0', '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11', '-ar', '48000', audio.path], { signal, input: new Uint8Array(track.buffer) })
     if (!captions) return { audio }
 
@@ -93,9 +96,9 @@ export function createNarration({ rate, speak, drawCaptions }) {
       audio,
       captions: lines.map((line, index) => {
         const { box, image } = drawn[index]
-        const end = line.start + line.samples.length / rate
-        const y = captionY({ start: line.start, end, box, position: line.caption }, trace, viewport)
-        return { path: paths[index], start: line.start, end, x: Math.round(image.x * scale), y: Math.round((image.y + y - box.y) * scale) }
+        const { start, end } = spoken[index]
+        const y = captionY({ start, end, box, position: line.caption }, trace, viewport)
+        return { path: paths[index], start, end, x: Math.round(image.x * scale), y: Math.round((image.y + y - box.y) * scale) }
       }),
     }
   }

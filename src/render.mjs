@@ -11,30 +11,35 @@ const ASSETS = join(import.meta.dirname, 'assets')
 // The arrow tip in cursor.svg.
 const CURSOR_HOTSPOT = { x: 6.6, y: 1.6 }
 const CLICK = { duration: 0.24, scaleStart: 0.7, scaleEnd: 1.25 }
+// Under the narration, audio is turned down to a quarter (12 dB) while a line is spoken, fading over 0.2 seconds on
+// either side. Lines less than a second apart share one dip, so the audio does not swell between them.
+const DUCK = { level: 0.25, fade: 0.2, join: 1 }
 
-export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, signal, audio, captions = [] }) {
+// `audio` is the caller's { path, offset }, and `narration` the spoken track from the first frame: { path, spoken: [{ start, end }] }.
+export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, signal, audio, narration, captions = [] }) {
   const { fps } = config.video
   const outputDuration = Math.max(1 / fps, trace.end + config.postRoll, ...trace.clicks.map((click) => click.at + CLICK.duration))
   if (audio && audio.offset >= outputDuration) {
     throw new TraceframeError(`Audio offset ${audio.offset} seconds starts at or after the video's end (${number(outputDuration)} seconds). Reduce its offset.`, { code: 'AUDIO_OUTSIDE_VIDEO' })
   }
   const filterPath = runFiles(directory).filter
-  await writeFile(filterPath, buildFilterScript({ trace, scale: config.scale, fps, audio, captions, overlayEofAction: ffmpeg.overlayEofAction }))
+  await writeFile(filterPath, buildFilterScript({ trace, scale: config.scale, fps, audio, narration, captions, overlayEofAction: ffmpeg.overlayEofAction }))
   const outputTemp = join(dirname(config.output), `.traceframe-${randomUUID()}.tmp.mp4`)
   const inputs = {
     capture: ['-i', rawPath],
     cursor: ['-loop', '1', '-framerate', String(fps), '-i', join(ASSETS, `cursor-${config.scale}x.png`)],
     pulse: ['-loop', '1', '-framerate', String(fps), '-t', String(CLICK.duration + 1 / fps), '-i', join(ASSETS, `click-pulse-${config.scale}x.png`)],
     audio: ['-i', audio?.path],
+    narration: ['-i', narration?.path],
     ...Object.fromEntries(captions.map((caption, index) => [`caption${index}`, ['-loop', '1', '-framerate', String(fps), '-t', String(number(caption.end - caption.start + 1 / fps)), '-i', caption.path]])),
   }
   const args = [
     '-y', '-hide_banner', '-loglevel', 'error',
-    ...Object.keys(inputIndices(trace, audio, captions)).flatMap((name) => inputs[name]),
+    ...Object.keys(inputIndices(trace, audio, narration, captions)).flatMap((name) => inputs[name]),
     ffmpeg.filterComplexFileOption, filterPath,
     '-map', '[final]',
   ]
-  if (audio) args.push('-map', '[finalAudio]', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2')
+  if (audio || narration) args.push('-map', '[finalAudio]', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2')
   args.push(
     '-t', String(number(outputDuration)),
     '-r', String(fps),
@@ -60,9 +65,9 @@ export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, s
 
 // Event times are seconds from the first frame of the raw video. Captions ({ path, start, end, x, y }) are images
 // placed in video pixels, drawn over the page and under the click pulses and cursor.
-export function buildFilterScript({ trace, scale, fps, audio, captions = [], overlayEofAction }) {
+export function buildFilterScript({ trace, scale, fps, audio, narration, captions = [], overlayEofAction }) {
   const { clicks, moves } = trace
-  const input = inputIndices(trace, audio, captions)
+  const input = inputIndices(trace, audio, narration, captions)
   const animatedOverlays = clicks.length > 0 || moves.length > 0 || captions.length > 0
   // Repeat the last picture and resample to the output rate. The padding also covers a sub-frame take or final rounding.
   // Animated overlays need every output tick, even on a static page, so the cadence comes first. With stationary
@@ -104,19 +109,41 @@ export function buildFilterScript({ trace, scale, fps, audio, captions = [], ove
     filters.push(`[cursorVideo${index}][cursor${index + 1}]overlay=x='${x}':y='${y}':${overlay}:enable='${enable}'[cursorVideo${index + 1}]`)
   })
   filters.push(`[cursorVideo${moves.length}]colorspace=ispace=bt470bg:iprimaries=bt709:itrc=bt709:all=bt709:format=yuv420p${animatedOverlays ? '' : ',' + cadence}[final]`)
-  if (audio) {
-    const trim = number(Math.max(0, -audio.offset))
-    const delay = number(Math.max(0, audio.offset) * 1000)
-    // Reset the selected stream before trimming: its first sample may start after the container's video.
-    // Preserve real gaps before sample-count filters, tolerating normal recorder timestamp jitter.
-    filters.push(`[${input.audio}:a:0]asetpts=PTS-STARTPTS,aresample=async=1:min_hard_comp=0.02,atrim=start=${trim},asetpts=PTS-STARTPTS,adelay=${delay}:all=1,apad[finalAudio]`)
-  }
+  if (audio || narration) filters.push(...audioFilters(input, audio, narration))
   return filters.join(';')
 }
 
-// FFmpeg numbers its inputs in this order; the click pulse, the audio and the captions are added only when used.
-function inputIndices(trace, audio, captions) {
-  const names = ['capture', 'cursor', ...(trace.clicks.length ? ['pulse'] : []), ...(audio ? ['audio'] : []), ...captions.map((_, index) => `caption${index}`)]
+// The audio at its offset and the narration from the first frame, mixed when there are both, as [finalAudio].
+function audioFilters(input, audio, narration) {
+  // Reset the selected stream before trimming: its first sample may start after the container's video.
+  // Preserve real gaps before sample-count filters, tolerating normal recorder timestamp jitter.
+  const place = (index, offset) => `[${index}:a:0]asetpts=PTS-STARTPTS,aresample=async=1:min_hard_comp=0.02,atrim=start=${number(Math.max(0, -offset))},asetpts=PTS-STARTPTS,adelay=${number(Math.max(0, offset) * 1000)}:all=1`
+  if (!narration) return [`${place(input.audio, audio.offset)},apad[finalAudio]`]
+  if (!audio) return [`${place(input.narration, 0)},apad[finalAudio]`]
+
+  const dips = []
+  for (const { start, end } of narration.spoken) {
+    const last = dips.at(-1)
+    if (last && start - last.end < DUCK.join) last.end = end
+    else dips.push({ start, end })
+  }
+  // 1 within a dip and 0 outside it, with a linear fade between. Dips are further apart than two fades, so their sum
+  // stays within 0 to 1.
+  const ducked = dips.map(({ start, end }) => `clip(min(t-${number(start)},${number(end)}-t)/${DUCK.fade}+1,0,1)`).join('+')
+  const stereo = 'aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo'
+  return [
+    // The level is set once per frame, so short frames keep its fades smooth.
+    `${place(input.audio, audio.offset)},${stereo},asetnsamples=240,volume='1-${1 - DUCK.level}*(${ducked})':eval=frame,apad[underVoice]`,
+    `${place(input.narration, 0)},${stereo},apad[voice]`,
+    // Both keep their level, rather than each being divided by the number of inputs.
+    '[underVoice][voice]amix=inputs=2:normalize=0[finalAudio]',
+  ]
+}
+
+// FFmpeg numbers its inputs in this order; the click pulse, the audio, the narration and the captions are added only
+// when used.
+function inputIndices(trace, audio, narration, captions) {
+  const names = ['capture', 'cursor', ...(trace.clicks.length ? ['pulse'] : []), ...(audio ? ['audio'] : []), ...(narration ? ['narration'] : []), ...captions.map((_, index) => `caption${index}`)]
   return Object.fromEntries(names.map((name, index) => [name, index]))
 }
 

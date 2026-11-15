@@ -102,6 +102,7 @@ export function runFiles(directory) {
     capture: join(directory, 'capture.mkv'),
     filter: join(directory, 'render.filter'),
     screenshot: join(directory, 'failure.png'),
+    narration: join(directory, 'narration.wav'),
   }
 }
 

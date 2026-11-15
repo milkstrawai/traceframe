@@ -158,7 +158,7 @@ test('static audio errors reject before a caller-page flow and preserve the prev
       for (const input of [join(directory, 'missing.wav'), directory, rawPath]) {
         await assert.rejects(recordPage({ page, output, audio: { path: input }, flow: () => { called = true } }), { code: 'AUDIO_INVALID' })
       }
-      for (const name of ['capture.mkv', 'capture.webm', 'render.filter', 'failure.png']) {
+      for (const name of ['capture.mkv', 'capture.webm', 'render.filter', 'failure.png', 'narration.wav']) {
         const input = join(directory, name)
         await copyFile(path, input)
         await assert.rejects(recordPage({ page, output, runDirectory: directory, audio: { path: input }, flow: () => { called = true } }), { code: 'INVALID_CONFIG' })
