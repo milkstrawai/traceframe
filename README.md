@@ -2,7 +2,7 @@
 
 Traceframe records a scripted Chromium flow and renders an MP4 with a smooth cursor and click pulse. Everything runs locally: pages, flows, videos, and authentication state stay on your machine.
 
-Browser capture is silent by default. Add an [external audio file](#add-audio) with explicit timing; tab audio and microphones are not captured automatically.
+Browser capture is silent by default. A flow can [narrate itself](#add-a-voice-over) with a local text-to-speech model, or you can add an [external audio file](#add-audio) with explicit timing; tab audio and microphones are not captured automatically.
 
 https://github.com/user-attachments/assets/38e02cd5-a9ba-4f3c-938c-159955353141
 
@@ -16,7 +16,7 @@ npx playwright@1.64.1 install --only-shell chromium
 
 To use system Chrome 150 or later, pass `--browser` or set `CHROME_PATH`. Older Chrome versions can fail to scroll targets inside panels. Recording uses Playwright's frame callback and does not require its separate FFmpeg executable.
 
-In a sandbox, such as a coding agent's, allow Playwright's browser download and let Chromium start.
+In a sandbox, such as a coding agent's, allow Playwright's browser download and let Chromium start. For a [voice-over](#add-a-voice-over), also allow its model download from Hugging Face on first use.
 
 To record pages behind a login, pass a Playwright storage-state file with `--storage-state`. See [creating saved login state and switching accounts](docs/recording-flows.md#save-and-switch-login-state), and keep state in `.auth/` or another ignored location.
 
@@ -61,7 +61,7 @@ For capture quality, slower machines, GPU rendering and temporary storage, see [
 
 ### Keep run files and diagnose failures
 
-Use `--run-dir .traceframe/runs/name` (`runDirectory` in the API) to keep the raw capture and FFmpeg filter file, including a partial capture if the flow fails during recording. An interrupted or failed capture can be incomplete; a retained file is not proof that recording finalized successfully. On a preparation or recording failure, Traceframe also tries to save a viewport screenshot as `failure.png`. Keep that directory out of Git, because captures and screenshots can contain private page data.
+Use `--run-dir .traceframe/runs/name` (`runDirectory` in the API) to keep the raw capture (including a partial capture if the flow fails during recording) and the FFmpeg filter file. A narrated take also keeps its narration (`narration.wav`) and caption images (`caption-<n>.png`). An interrupted or failed capture can be incomplete; a retained file is not proof that recording finalized successfully. On a preparation or recording failure, Traceframe also tries to save a viewport screenshot as `failure.png`. Keep that directory out of Git, because captures and screenshots can contain private page data.
 
 When available, failure output includes the error code, flow-file locations, elapsed recording time, and paths to artifacts saved for that attempt. Without `--run-dir`, temporary captures are removed and no failure screenshot is saved. See [diagnosing a failed take](docs/recording-flows.md#diagnose-a-failed-take).
 
@@ -86,7 +86,7 @@ The optional `ready({ page, signal })` hook runs after initial navigation and be
 
 ### Helpers
 
-The default function receives a Playwright `page`, an `AbortSignal` named `signal`, and five helpers:
+The default function receives a Playwright `page`, an `AbortSignal` named `signal`, and six helpers:
 
 | Helper | Use |
 | --- | --- |
@@ -95,6 +95,7 @@ The default function receives a Playwright `page`, an `AbortSignal` named `signa
 | `click(locator, { duration, dwell })` | Move, pause, and click a locator. |
 | `scroll(locator)` | Center a target without moving the pointer. |
 | `wait(seconds)` | Pause for reading time. |
+| `say(text, options)` | Speak a line and caption it; see [voice-over](#add-a-voice-over). |
 
 A move takes 0.5 seconds by default. A click pauses on the target for 0.25 seconds (`dwell`) before pressing, and waits for a disabled target to become enabled. `click` and `hover` leave the pointer in place if it is already inside the target's box.
 
@@ -131,6 +132,48 @@ Inspect the running application, use stable role or test-id locators, add a read
 and use Traceframe's click, hover, move, scroll, and wait helpers for visible interactions.
 Write the result to flow.mjs and explain how to run it.
 ```
+
+## Add a voice-over
+
+A flow can narrate itself. Traceframe speaks each line with [Phonon](https://huggingface.co/gradium/phonon-31m-en), a small English text-to-speech model that runs on your machine, and captions it in the video. Install its browser package in your project once:
+
+```sh
+npm install -D phonon-tts@0.7.1
+```
+
+Then export `voice` from the flow and call `say()`:
+
+```js
+export const voice = true
+
+export default async function ({ page, click, say }) {
+  const open = page.getByRole('button', { name: 'Open settings' })
+  await say('This is the example workspace.')
+  await say('First, open the settings panel.', () => click(open))
+  await say('Then press Save to keep the change.', {
+    click: page.getByRole('button', { name: 'Save', exact: true }),
+    on: 'Save',
+  })
+}
+```
+
+`say(text)` speaks from the moment it is called and returns 0.3 seconds after the line ends. Await each line.
+
+| Option | Use |
+| --- | --- |
+| `during` | A function to run while the line is spoken, such as `() => click(open)`. Pass it as the second argument or as `{ during }`. `say()` returns when both are done, and rejects as soon as it fails; a line still being spoken is then left out. Lines are spoken one at a time, so a `say()` inside it is spoken after this line. |
+| `click`, `on` | Click a locator as the line says `on`: the first match of that word or words, ignoring case. `duration` and `dwell` work as for `click()`. |
+| `caption` | `'top'` or `'bottom'`, to fix where this line's caption goes. |
+
+Phonon gives no word timings, so Traceframe estimates where the word starts (within about 0.15 seconds in tests) and presses as it is said. If the pointer needs longer to reach the target than the line takes to reach the word, the line starts that much later.
+
+Phonon reads numbers and common abbreviations; if it says a name wrongly, spell it the way it sounds. Speech counts toward the flow timeout. The first narrated take downloads the 65 MB model into `~/.cache/traceframe` (`$XDG_CACHE_HOME/traceframe` when set); later takes need no network. `phonon-tts` is MIT or Apache-2.0, and the model is Apache-2.0.
+
+Each caption shows while its line is spoken, in the [recording guide's caption style](docs/recording-flows.md#add-captions-and-reading-time). It sits at the bottom, unless there it would cover the element the pointer is using or heading for, or the moving pointer, and the top would cover less. It cannot see what appears on its own, such as a toast; use `caption: 'top'` for that line. A long line gets smaller type; one too long to fit even then stops the recording with `INVALID_FLOW`. To turn captions off, export `voice = { captions: false }`.
+
+With `recordPage`, pass `voice: true` or `voice: { captions: false }`; voice uses Playwright's Chromium, or `CHROME_PATH` when set. A narrated flow cannot also take `audio`. The summary includes `lineCount`, and `audio: true` once a line was spoken.
+
+Without `phonon-tts`, or with another version of it, Traceframe stops before recording with `VOICE_RUNTIME_MISSING` and the install command. With `npx`, install it in the project you run from; with a global Traceframe, install it globally. A failed model download or speech failure stops with `VOICE_FAILED`.
 
 ## Programmatic usage
 
@@ -170,11 +213,11 @@ await recordPage({
 })
 ```
 
-The callback receives the same `page`, `signal` and five helpers as a flow file. It can close over your script's locators and state. See the [runnable existing-page example](examples/existing-page.mjs); in a clone, run `node examples/existing-page.mjs` to save `.traceframe/existing-page.mp4` using synthetic local content.
+The callback receives the same `page`, `signal` and six helpers as a flow file. It can close over your script's locators and state. See the [runnable existing-page example](examples/existing-page.mjs); in a clone, run `node examples/existing-page.mjs` to save `.traceframe/existing-page.mp4` using synthetic local content.
 
 Use Playwright 1.64.1 with Chromium, a fixed viewport, 100% browser zoom and an unscaled page. Traceframe checks the page's inner dimensions and visual viewport before starting capture, rejecting unsupported geometry with `CAPTURE_SIZE_MISMATCH`. `recordPage` keeps the page, context and browser open on success, failure and cancellation. It does not navigate, resize, run a `ready` hook, or change page timeouts. Your script owns setup and shutdown. The CLI and `record` continue to create and close their own browser.
 
-`page` and a function `flow` are required. `output`, `audio`, `postRoll`, `flowTimeout`, `runDirectory` and `signal` have the same meaning as in `record`, and the return value is the same recording summary. Set `initialPointer: { x, y }` to choose the starting cursor position. The page's viewport determines the dimensions; `scale` defaults to 1 and accepts 1 or 2, and `fps` defaults to 30 and accepts 30 or 60. Use these explicit settings instead of a preset. Browser setup options such as `url`, `browser`, `gpu`, `storageState`, viewport dimensions and `readyTimeout` are rejected.
+`page` and a function `flow` are required. `output`, `audio`, `postRoll`, `flowTimeout`, `runDirectory` and `signal` have the same meaning as in `record`, and the return value is the same recording summary. Set `initialPointer: { x, y }` to choose the starting cursor position, and `voice: true` to narrate with `say()`. The page's viewport determines the dimensions; `scale` defaults to 1 and accepts 1 or 2, and `fps` defaults to 30 and accepts 30 or 60. Use these explicit settings instead of a preset. Browser setup options such as `url`, `browser`, `gpu`, `storageState`, viewport dimensions and `readyTimeout` are rejected.
 
 Traceframe moves the caller's pointer only after validating the first frame. To show the starting hover state from frame 0, move the page's mouse to your chosen `initialPointer` before calling `recordPage`.
 
