@@ -242,7 +242,11 @@ test('an audio supplier uses the first-frame clock, runs after capture, and pres
         audio: async ({ startedAt, signal }) => {
           assert.equal(completed, true)
           assert.equal(signal, undefined)
-          assert.ok(startedAt >= requestedAt && startedAt <= eventAt)
+          // startedAt is the first frame's time from Chromium, which stamps a frame up to about 18 ms later than Node's
+          // clock reads when the frame arrives, so a flow that starts right away can begin "before" the first frame.
+          // 50 ms leaves about three times that.
+          const lead = 50
+          assert.ok(startedAt >= requestedAt && startedAt <= eventAt + lead, `startedAt ${startedAt} should be from ${requestedAt} to ${eventAt} + ${lead} ms`)
           const generated = join(directory, 'recorded.wav')
           await writeFile(generated, await readFile(path))
           supplied = true
