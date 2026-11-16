@@ -19,13 +19,13 @@ try {
   await writeFile(join(directory, 'package.json'), '{ "private": true, "type": "module" }\n')
   await run(process.execPath, [npm, 'install', '--no-audit', '--no-fund', join(directory, filename)], { cwd: directory })
 
-  const installed = join(directory, 'node_modules', '@milkstraw', 'traceframe')
+  const installed = join(directory, 'node_modules', 'traceframe')
   const manifest = JSON.parse(await readFile(join(installed, 'package.json'), 'utf8'))
   const bin = join(installed, manifest.bin.traceframe)
   const examples = join(installed, 'examples')
   const { version, devDependencies } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
   assert.equal((await run(process.execPath, [bin, '--version'])).stdout, `${version}\n`)
-  assert.equal((await run(process.execPath, ['--input-type=module', '-e', 'const { record, recordPage } = await import("@milkstraw/traceframe"); console.log(typeof record, typeof recordPage)'], { cwd: directory })).stdout, 'function function\n')
+  assert.equal((await run(process.execPath, ['--input-type=module', '-e', 'const { record, recordPage } = await import("traceframe"); console.log(typeof record, typeof recordPage)'], { cwd: directory })).stdout, 'function function\n')
 
   const audio = join(directory, 'sound.wav')
   await run('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', audio])

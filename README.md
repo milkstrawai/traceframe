@@ -25,7 +25,7 @@ To record pages behind a login, pass a Playwright storage-state file with `--sto
 Run Traceframe with `npx` without adding it to your project's dependencies. Pass your application URL and your own [flow file](#write-a-flow):
 
 ```sh
-npx @milkstraw/traceframe record \
+npx traceframe record \
   --url http://localhost:3000 \
   --flow ./flow.mjs \
   --out ./recording.mp4
@@ -34,7 +34,7 @@ npx @milkstraw/traceframe record \
 For regular use, you can install the command globally:
 
 ```sh
-npm install -g @milkstraw/traceframe
+npm install -g traceframe
 traceframe record --url http://localhost:3000 --flow ./flow.mjs --out ./recording.mp4
 ```
 
@@ -47,7 +47,7 @@ export default async function ({ wait }) {
 ```
 
 ```sh
-npx @milkstraw/traceframe record \
+npx traceframe record \
   --url 'data:text/html,<h1>Traceframe smoke</h1>' \
   --flow ./smoke.mjs --out ./smoke.mp4 \
   --preset draft
@@ -182,11 +182,11 @@ Without `phonon-tts`, or with another version of it, Traceframe stops before rec
 To call Traceframe from JavaScript, install it in your project:
 
 ```sh
-npm install @milkstraw/traceframe
+npm install traceframe
 ```
 
 ```js
-import { record } from '@milkstraw/traceframe'
+import { record } from 'traceframe'
 
 await record({
   url: 'http://localhost:3000',
@@ -201,7 +201,7 @@ await record({
 Use `recordPage` when your script already owns a Playwright page, including a page in a persistent extension context. Prepare navigation, authentication, application readiness and fonts before calling it. With a prepared `page`:
 
 ```js
-import { recordPage } from '@milkstraw/traceframe'
+import { recordPage } from 'traceframe'
 
 const save = page.getByRole('button', { name: 'Save', exact: true })
 await recordPage({
@@ -238,7 +238,7 @@ Traceframe removes its temporary capture unless `runDirectory` is supplied. For 
 Both `record` and `recordPage` accept `audio: { path: './sound.wav', offset: 0 }`. The CLI accepts the same settings:
 
 ```sh
-npx @milkstraw/traceframe record --url http://localhost:3000 --flow ./flow.mjs \
+npx traceframe record --url http://localhost:3000 --flow ./flow.mjs \
   --audio .traceframe/sound.wav --audio-offset 0.5 --out .traceframe/demo.mp4
 ```
 

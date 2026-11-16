@@ -7,7 +7,7 @@ Use this guide yourself or give it to a coding agent with the journey you want t
 The package includes [a complete flow](../examples/recipes-flow.mjs) and [its local page](../examples/recipes.html). It types English and Arabic, waits for two simulated replies, selects a fake file, and clicks a final action in a panel below the fold, which `click` scrolls into view first. After a global installation and the [prerequisites](../README.md#prerequisites), run:
 
 ```sh
-TRACEFRAME_EXAMPLES="$(npm root -g)/@milkstraw/traceframe/examples"
+TRACEFRAME_EXAMPLES="$(npm root -g)/traceframe/examples"
 traceframe record \
   --url "file://$TRACEFRAME_EXAMPLES/recipes.html" \
   --flow "$TRACEFRAME_EXAMPLES/recipes-flow.mjs" \
@@ -39,7 +39,7 @@ npx playwright@1.64.1 codegen --save-storage=.auth/first-account.json http://loc
 Sign in normally, wait for the authenticated screen, then close the browser window to save the state. This requires a desktop/display; the headless-shell-only installation used for recording is insufficient. Record with the same application origin, including its port:
 
 ```sh
-npx @milkstraw/traceframe record \
+npx traceframe record \
   --url http://localhost:3000 --flow ./flow.mjs \
   --storage-state .auth/first-account.json --out ./recording.mp4
 ```
@@ -249,7 +249,7 @@ import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdir, rm } from 'node:fs/promises'
 import { chromium } from 'playwright'
-import { recordPage } from '@milkstraw/traceframe'
+import { recordPage } from 'traceframe'
 
 const browser = await chromium.launch({ ignoreDefaultArgs: ['--mute-audio'], env: { ...process.env, PULSE_SINK: 'traceframe-sound' } })
 const page = await browser.newPage()

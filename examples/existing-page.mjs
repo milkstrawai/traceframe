@@ -1,5 +1,5 @@
 import { chromium } from 'playwright'
-import { recordPage } from '@milkstraw/traceframe'
+import { recordPage } from 'traceframe'
 
 const browser = await chromium.launch()
 try {
