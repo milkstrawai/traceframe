@@ -11,9 +11,11 @@ const ASSETS = join(import.meta.dirname, 'assets')
 // The arrow tip in cursor.svg.
 const CURSOR_HOTSPOT = { x: 6.6, y: 1.6 }
 const CLICK = { duration: 0.24, scaleStart: 0.7, scaleEnd: 1.25 }
-// Under the narration, audio is turned down to a quarter (12 dB) while a line is spoken, fading over 0.2 seconds on
-// either side. Lines less than a second apart share one dip, so the audio does not swell between them.
-const DUCK = { level: 0.25, fade: 0.2, join: 1 }
+// Under the narration, audio is turned down while a line is spoken, just enough to sit 18 dB below the voice there,
+// fading over 0.2 seconds on either side. Audio already that quiet is left as it is, and nothing is turned up. Lines
+// less than a second apart share one dip, so the audio does not swell between them.
+const DUCK = { below: 18, fade: 0.2, join: 1 }
+const STEREO = 'aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo'
 
 // `audio` is the caller's { path, offset }, and `narration` the spoken track from the first frame: { path, spoken: [{ start, end }] }.
 export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, signal, audio, narration, captions = [] }) {
@@ -23,7 +25,8 @@ export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, s
     throw new TraceframeError(`Audio offset ${audio.offset} seconds starts at or after the video's end (${number(outputDuration)} seconds). Reduce its offset.`, { code: 'AUDIO_OUTSIDE_VIDEO' })
   }
   const filterPath = runFiles(directory).filter
-  await writeFile(filterPath, buildFilterScript({ trace, scale: config.scale, fps, audio, narration, captions, overlayEofAction: ffmpeg.overlayEofAction }))
+  const duck = audio && narration ? await duckUnderVoice(audio, narration, signal) : []
+  await writeFile(filterPath, buildFilterScript({ trace, scale: config.scale, fps, audio, narration, duck, captions, overlayEofAction: ffmpeg.overlayEofAction }))
   const outputTemp = join(dirname(config.output), `.traceframe-${randomUUID()}.tmp.mp4`)
   const inputs = {
     capture: ['-i', rawPath],
@@ -64,8 +67,9 @@ export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, s
 }
 
 // Event times are seconds from the first frame of the raw video. Captions ({ path, start, end, x, y }) are images
-// placed in video pixels, drawn over the page and under the click pulses and cursor.
-export function buildFilterScript({ trace, scale, fps, audio, narration, captions = [], overlayEofAction }) {
+// placed in video pixels, drawn over the page and under the click pulses and cursor. Under the narration, `duck` turns
+// the audio down by `cut` dB from `start` to `end`: [{ start, end, cut }].
+export function buildFilterScript({ trace, scale, fps, audio, narration, duck = [], captions = [], overlayEofAction }) {
   const { clicks, moves } = trace
   const input = inputIndices(trace, audio, narration, captions)
   const animatedOverlays = clicks.length > 0 || moves.length > 0 || captions.length > 0
@@ -109,35 +113,80 @@ export function buildFilterScript({ trace, scale, fps, audio, narration, caption
     filters.push(`[cursorVideo${index}][cursor${index + 1}]overlay=x='${x}':y='${y}':${overlay}:enable='${enable}'[cursorVideo${index + 1}]`)
   })
   filters.push(`[cursorVideo${moves.length}]colorspace=ispace=bt470bg:iprimaries=bt709:itrc=bt709:all=bt709:format=yuv420p${animatedOverlays ? '' : ',' + cadence}[final]`)
-  if (audio || narration) filters.push(...audioFilters(input, audio, narration))
+  if (audio || narration) filters.push(...audioFilters(input, audio, narration, duck))
   return filters.join(';')
 }
 
 // The audio at its offset and the narration from the first frame, mixed when there are both, as [finalAudio].
-function audioFilters(input, audio, narration) {
-  // Reset the selected stream before trimming: its first sample may start after the container's video.
-  // Preserve real gaps before sample-count filters, tolerating normal recorder timestamp jitter.
-  const place = (index, offset) => `[${index}:a:0]asetpts=PTS-STARTPTS,aresample=async=1:min_hard_comp=0.02,atrim=start=${number(Math.max(0, -offset))},asetpts=PTS-STARTPTS,adelay=${number(Math.max(0, offset) * 1000)}:all=1`
-  if (!narration) return [`${place(input.audio, audio.offset)},apad[finalAudio]`]
-  if (!audio) return [`${place(input.narration, 0)},apad[finalAudio]`]
+function audioFilters(input, audio, narration, duck) {
+  if (!narration) return [`[${input.audio}:a:0]${place(audio.offset)},apad[finalAudio]`]
+  if (!audio) return [`[${input.narration}:a:0]${place(0)},apad[finalAudio]`]
 
+  // Each dip is 1 within it and 0 outside it, with a linear fade between, times the share of the audio it takes away.
+  // Dips are further apart than two fades, so at most one is fading at a time.
+  const dips = duck.filter(({ cut }) => cut > 0)
+    .map(({ start, end, cut }) => `${number(1 - 10 ** (-cut / 20))}*clip(min(t-${number(start)},${number(end)}-t)/${DUCK.fade}+1,0,1)`)
+  // The level is set once per frame, so short frames keep its fades smooth.
+  const level = dips.length ? `,asetnsamples=240,volume='1-(${dips.join('+')})':eval=frame` : ''
+  return [
+    `[${input.audio}:a:0]${place(audio.offset)},${STEREO}${level},apad[underVoice]`,
+    `[${input.narration}:a:0]${place(0)},${STEREO},apad[voice]`,
+    // Both keep their level, rather than each being divided by the number of inputs.
+    '[underVoice][voice]amix=inputs=2:normalize=0[finalAudio]',
+  ]
+}
+
+// An audio stream placed in the video `offset` seconds in, or with its first -offset seconds cut. Its first sample may
+// start after the container's video, so the stream is reset before trimming. Real gaps are kept for the sample-count
+// filters after it, tolerating normal recorder timestamp jitter.
+function place(offset) {
+  return `asetpts=PTS-STARTPTS,aresample=async=1:min_hard_comp=0.02,atrim=start=${number(Math.max(0, -offset))},asetpts=PTS-STARTPTS,adelay=${number(Math.max(0, offset) * 1000)}:all=1`
+}
+
+// One dip for each stretch of speech, with the cut in dB that keeps the audio DUCK.below under the voice there, measured
+// as each sounds in the mix.
+export async function duckUnderVoice(audio, narration, signal) {
   const dips = []
   for (const { start, end } of narration.spoken) {
     const last = dips.at(-1)
     if (last && start - last.end < DUCK.join) last.end = end
     else dips.push({ start, end })
   }
-  // 1 within a dip and 0 outside it, with a linear fade between. Dips are further apart than two fades, so their sum
-  // stays within 0 to 1.
-  const ducked = dips.map(({ start, end }) => `clip(min(t-${number(start)},${number(end)}-t)/${DUCK.fade}+1,0,1)`).join('+')
-  const stereo = 'aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo'
-  return [
-    // The level is set once per frame, so short frames keep its fades smooth.
-    `${place(input.audio, audio.offset)},${stereo},asetnsamples=240,volume='1-${1 - DUCK.level}*(${ducked})':eval=frame,apad[underVoice]`,
-    `${place(input.narration, 0)},${stereo},apad[voice]`,
-    // Both keep their level, rather than each being divided by the number of inputs.
-    '[underVoice][voice]amix=inputs=2:normalize=0[finalAudio]',
-  ]
+  // One block past the last line, which covers its last block even when the line is shorter than a block. One at a
+  // time, so a failed or cancelled measurement leaves no other still reading.
+  const until = dips.at(-1).end + 0.4
+  const sound = await measureLoudness(audio.path, audio.offset, until, signal)
+  const voice = await measureLoudness(narration.path, 0, until, signal)
+  return dips.map(({ start, end }) => {
+    const voiceLevel = loudness(voice, start, end)
+    const cut = voiceLevel === -Infinity ? 0 : Math.max(0, loudness(sound, start, end) - (voiceLevel - DUCK.below))
+    return { start, end, cut }
+  })
+}
+
+// The loudness in LUFS of the first audio stream, placed as in the mix and padded with silence to `until` seconds, as
+// FFmpeg measures it for each 400 ms, every 100 ms: entry k ends (k + 1) / 10 seconds into the video.
+async function measureLoudness(path, offset, until, signal) {
+  const chain = `${place(offset)},apad,atrim=end=${number(until)},${STEREO},ebur128=metadata=1,ametadata=mode=print:key=lavfi.r128.M:file=-`
+  // The output grows by about 0.6 kB per second, past the 1 MiB default after half an hour.
+  const { stdout } = await runCommand('ffmpeg', ['-v', 'error', '-i', path, '-map', '0:a:0', '-af', chain, '-f', 'null', '-'], { signal, maxBuffer: Infinity })
+  return [...stdout.matchAll(/lavfi\.r128\.M=(\S+)/g)].map(([, value]) => Number(value))
+}
+
+// The gated loudness (ITU-R BS.1770, as in FFmpeg's integrated loudness) of the 400 ms blocks that cover `start` to
+// `end` seconds, or -Infinity when they are silent.
+function loudness(blocks, start, end) {
+  // Block k spans (k - 3) / 10 to (k + 1) / 10 seconds. These run from the block starting at or before `start` through
+  // the one ending at or after `end`, or are just the first when it already reaches `end`. The 1e-6 keeps a time on
+  // the grid that addition left a hair off, such as 0.1 + 0.2, from taking one more block.
+  const first = Math.floor(start * 10 + 1e-6) + 3
+  const last = Math.max(first, Math.ceil(end * 10 - 1e-6) - 1)
+  // Silence reads far below -70, under the absolute gate.
+  const levels = blocks.slice(first, last + 1).filter((level) => level > -70)
+  if (!levels.length) return -Infinity
+  const mean = (list) => 10 * Math.log10(list.reduce((sum, level) => sum + 10 ** (level / 10), 0) / list.length)
+  const gate = mean(levels) - 10
+  return mean(levels.filter((level) => level > gate))
 }
 
 // FFmpeg numbers its inputs in this order; the click pulse, the audio, the narration and the captions are added only

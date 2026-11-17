@@ -173,7 +173,7 @@ Each caption shows while its line is spoken, in the [recording guide's caption s
 
 With `recordPage`, pass `voice: true` or `voice: { captions: false }`; voice uses Playwright's Chromium, or `CHROME_PATH` when set. The summary includes `lineCount`, and `audio: true` once a line was spoken.
 
-With [`audio`](#add-audio) as well, such as the page's own sound, the narration plays over it. The audio is turned down by 12 dB while each line is spoken, and stays down between lines less than a second apart.
+With [`audio`](#add-audio) as well, such as the page's own sound, the narration plays over it. While each line is spoken, the audio is turned down just enough to sit 18 dB below the voice, and stays down between lines less than a second apart. Audio already that quiet is left as it is, and audio is never turned up.
 
 Without `phonon-tts`, or with another version of it, Traceframe stops before recording with `VOICE_RUNTIME_MISSING` and the install command. With `npx`, install it in the project you run from; with a global Traceframe, install it globally. A failed model download or speech failure stops with `VOICE_FAILED`.
 

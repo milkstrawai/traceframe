@@ -90,14 +90,14 @@ test('narrates a page the caller opened', async () => {
 })
 
 test('mixes the narration over audio, which is turned down while a line is spoken', async () => {
-  // A low hum, below the voice, so its level can be read under the speech. Like a recorder running alongside the
-  // take, it lasts as long as the take, however slow the machine.
+  // A low hum, below the voice, so its level can be read under the speech, and loud enough to be turned down under
+  // every line. Like a recorder running alongside the take, it lasts as long as the take, however slow the machine.
   const hum = join(directory, 'hum.wav')
   let startedAt
   const audio = async (clock) => {
     startedAt = clock.startedAt
     const seconds = (Date.now() - startedAt) / 1000 + 1
-    await runCommand('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', `sine=frequency=60:sample_rate=48000:duration=${seconds}`, hum])
+    await runCommand('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', `sine=frequency=60:sample_rate=48000:duration=${seconds}`, '-af', 'volume=2', hum])
     return { path: hum, offset: 0 }
   }
   const { summary, filter } = await narratedTake('with-audio', true, { audio, postRoll: 1 })
