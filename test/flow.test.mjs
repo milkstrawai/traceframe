@@ -27,7 +27,7 @@ function target(page, { start = box, arrived = start, beforeClick = arrived, pre
     async boundingBox() { return page.mouse.downAt !== undefined ? pressed : page.mouse.moves.length ? beforeClick : start },
     async waitForElementState() {
       if (enabledError) throw enabledError
-      await enabling
+      enabling?.()
     },
     // The hit test passes the point to check; aiming passes nothing.
     async evaluate(_, point) { return point ? receivesPointer : { x: 0.5, y: 0.5 } },
@@ -154,9 +154,32 @@ test('the click that say() uses presses only once its line is ready, and returns
   // A line that fails while its target is still being checked stops the press.
   const line = new AbortController()
   const failure = new Error('during failed')
-  const enabling = delay(50).then(() => line.abort(failure))
-  await assert.rejects(click(target(page, { enabling }), { duration: 0.01, dwell: 0 }, { signal: line.signal }), (error) => error === failure)
+  await assert.rejects(click(target(page, { enabling: () => line.abort(failure) }), { duration: 0.01, dwell: 0 }, { signal: line.signal }), (error) => error === failure)
   assert.equal(trace.clicks.length, 1)
+})
+
+test('a flow cancelled while its click target is being checked does not press', async () => {
+  const { page } = setup()
+  const flow = new AbortController()
+  const api = createFlowApi({ page, trace: createTrace({ x: 20, y: 20 }), clock: Date.now(), viewport: { width: 400, height: 300 }, signal: flow.signal })
+  const reason = new Error('cancelled')
+  await assert.rejects(api.click(target(page, { enabling: () => flow.abort(reason) }), { duration: 0.01, dwell: 0 }), (error) => error === reason)
+  assert.equal(page.mouse.downAt, undefined)
+})
+
+test('times each move from when the pointer sets off', async () => {
+  const clock = Date.now()
+  const sent = []
+  const page = { mouse: { async move() { sent.push((Date.now() - clock) / 1000) } } }
+  const trace = createTrace({ x: 20, y: 20 })
+  const api = createFlowApi({ page, trace, clock, viewport: { width: 400, height: 300 } })
+  const duration = 0.2
+  await api.move({ x: 300, y: 250 }, { duration })
+  // The drawn cursor follows the trace, so its move must not start after the pointer's first step, nor end after its
+  // last. Both bounds hold however late the samples run.
+  const [{ at }] = trace.moves
+  assert.ok(at <= sent[0], `traced at ${at} s, first step at ${sent[0]} s`)
+  assert.ok(sent.at(-1) >= at + duration - 0.002, `traced to end at ${at + duration} s, last step at ${sent.at(-1)} s`)
 })
 
 test('say() asks for voice when the flow does not turn it on', async () => {

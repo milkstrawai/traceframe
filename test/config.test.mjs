@@ -74,6 +74,14 @@ test('existing-page settings reject implicit browser setup and unfixed viewports
   }
 })
 
+test('at scale 1, refuses an odd viewport, which the video encoder cannot take', () => {
+  assert.throws(() => createConfig({ ...base, scale: 1, viewportWidth: 641 }), { code: 'INVALID_CONFIG', message: /must be even/ })
+  assert.throws(() => createConfig({ ...base, scale: 1, viewportHeight: 401 }), { code: 'INVALID_CONFIG', message: /must be even/ })
+  assert.throws(() => createPageConfig({ page: { ...page, viewportSize: () => ({ width: 641, height: 480 }) } }), { code: 'INVALID_CONFIG', message: /must be even/ })
+  // At scale 2, the video is twice the viewport, so it is even either way.
+  assert.deepEqual(createConfig({ ...base, scale: 2, viewportWidth: 641, viewportHeight: 401 }).video, { width: 1282, height: 802, fps: 60 })
+})
+
 test('GPU mode defaults to auto and accepts only auto or off', () => {
   assert.equal(createConfig(base).gpu, 'auto')
   assert.equal(createConfig({ ...base, gpu: 'off' }).gpu, 'off')

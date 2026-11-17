@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-import { addDiagnostics, formatFailure } from '../src/diagnostics.mjs'
+import { addDiagnostics, formatFailure, retainedFile } from '../src/diagnostics.mjs'
 import { TraceframeError } from '../src/errors.mjs'
 
 test('extracts only exact flow locations across causes, without exposing other error fields', async () => {
@@ -95,4 +95,17 @@ test('callback errors retain timing and artifacts without inventing source locat
   const error = new Error('callback failed')
   await addDiagnostics(error, { recordingTime: 0.4, capturePath: '/example/capture.mkv' })
   assert.deepEqual(error.diagnostics, { flowLocations: [], recordingTime: 0.4, capturePath: '/example/capture.mkv' })
+})
+
+test('reports a capture as kept only when it holds data', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'traceframe-retained-'))
+  try {
+    const empty = join(directory, 'empty.mkv'), full = join(directory, 'capture.mkv')
+    await writeFile(empty, '')
+    await writeFile(full, 'frames')
+    assert.equal(await retainedFile(full), full)
+    assert.equal(await retainedFile(empty), undefined)
+    assert.equal(await retainedFile(join(directory, 'missing.mkv')), undefined)
+    assert.equal(await retainedFile(directory), undefined)
+  } finally { await rm(directory, { recursive: true, force: true }) }
 })
