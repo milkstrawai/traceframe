@@ -12,9 +12,10 @@ const config = { gpu: 'auto', scale: 2, video: { width: 640, height: 480 }, brow
 const signal = new AbortController().signal
 const linux = process.platform === 'linux'
 // The window matches the recording's pixels, so DOM fullscreen keeps the viewport.
-const baseArgs = ['--force-device-scale-factor=2', '--window-size=640,480', '--disable-accelerated-video-decode']
-const gpuArgs = [...baseArgs, '--enable-gpu', ...(linux ? ['--use-angle=gl-egl'] : [])]
-const softwareArgs = [...baseArgs, '--disable-gpu']
+const baseArgs = ['--force-device-scale-factor=2', '--window-size=640,480']
+const softwareDecode = '--disable-accelerated-video-decode'
+const gpuArgs = [...baseArgs, '--enable-gpu', ...(linux ? ['--use-angle=gl-egl'] : []), ...(process.platform === 'darwin' ? [] : [softwareDecode])]
+const softwareArgs = [...baseArgs, '--disable-gpu', softwareDecode]
 
 function stub(gpu = hardware) {
   const calls = { closes: 0, detaches: 0 }

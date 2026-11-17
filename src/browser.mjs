@@ -15,9 +15,10 @@ export async function launchBrowser(config, { handleSignals, signal }) {
     // The headless shell sizes DOM fullscreen from its window (800×600 pixels by default).
     // Match the recording's pixel size so a fullscreen page keeps the requested viewport.
     `--window-size=${config.video.width},${config.video.height}`,
-    // Keep video decoding in software: hardware decoding fails in headless Linux and added no captured frames on macOS.
-    '--disable-accelerated-video-decode',
   ]
+  // Video decodes in software unless GPU rendering runs on macOS, where decoding on the GPU saved about 1.4 processor
+  // cores on a 4K60 video. Headless Linux cannot pass GPU-decoded frames on, and Windows has not been tested.
+  const softwareDecode = ['--disable-accelerated-video-decode']
   async function launch(args) {
     try {
       return await chromium.launch({
@@ -32,11 +33,15 @@ export async function launchBrowser(config, { handleSignals, signal }) {
     }
   }
 
-  const softwareArgs = ['--disable-gpu']
+  const softwareArgs = ['--disable-gpu', ...softwareDecode]
   if (config.gpu === 'off') return { browser: await launch(softwareArgs), graphics: { hardwareAccelerated: false } }
 
   // Decide before navigation or ready(): application preparation runs only once.
-  const candidate = await launch(['--enable-gpu', ...(process.platform === 'linux' ? ['--use-angle=gl-egl'] : [])])
+  const candidate = await launch([
+    '--enable-gpu',
+    ...(process.platform === 'linux' ? ['--use-angle=gl-egl'] : []),
+    ...(process.platform === 'darwin' ? [] : softwareDecode),
+  ])
     .catch(error => { if (error.code === 'PLAYWRIGHT_RUNTIME_MISSING') throw error })
   const { renderer, fallbackReason } = candidate ? await inspectGraphics(candidate, signal) : { fallbackReason: 'gpu-launch-failed' }
   if (!fallbackReason) return { browser: candidate, graphics: { hardwareAccelerated: true, renderer } }
