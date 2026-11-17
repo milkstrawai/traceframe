@@ -12,6 +12,8 @@ const root = fileURLToPath(new URL('..', import.meta.url))
 const npm = process.env.npm_execpath
 if (!npm) throw new Error('Run this check with npm run test:package.')
 const directory = await mkdtemp(join(tmpdir(), 'traceframe package ü-'))
+// A folder with no packages in or above it, to record from as npx and a global install do.
+const elsewhere = await mkdtemp(join(tmpdir(), 'traceframe elsewhere-'))
 
 try {
   const { stdout: packed } = await run(process.execPath, [npm, 'pack', '--json', '--pack-destination', directory], { cwd: root })
@@ -55,11 +57,12 @@ try {
   assert.equal(pageSummary.height, 800)
   await run('ffmpeg', ['-v', 'error', '-xerror', '-i', pageSummary.output, '-f', 'null', '-'])
 
-  // Voice stops before recording until the project installs phonon-tts, and then narrates.
+  // Voice stops before recording until phonon-tts is installed beside Traceframe, and then narrates. Recording from
+  // elsewhere, only Traceframe's own location can find it.
   const narrated = join(directory, 'narrated.mjs')
   await writeFile(narrated, "export const voice = true\nexport default async ({ say }) => { await say('Traceframe speaks.') }\n")
-  const narrate = () => run(process.execPath, [bin, 'record', '--preset', 'draft', '--url', 'data:text/html,<h1>Voice</h1>', '--flow', narrated, '--out', join(directory, 'narrated.mp4')], { cwd: directory })
-  await assert.rejects(narrate(), ({ stderr }) => stderr.includes('[VOICE_RUNTIME_MISSING]') && stderr.includes(`npm install -D phonon-tts@${devDependencies['phonon-tts']}`))
+  const narrate = () => run(process.execPath, [bin, 'record', '--preset', 'draft', '--url', 'data:text/html,<h1>Voice</h1>', '--flow', narrated, '--out', join(directory, 'narrated.mp4')], { cwd: elsewhere })
+  await assert.rejects(narrate(), ({ stderr }) => stderr.includes('[VOICE_RUNTIME_MISSING]') && stderr.includes(`npx -p traceframe -p phonon-tts@${devDependencies['phonon-tts']} traceframe record`))
   await run(process.execPath, [npm, 'install', '--no-audit', '--no-fund', `phonon-tts@${devDependencies['phonon-tts']}`], { cwd: directory })
   const narratedSummary = JSON.parse((await narrate()).stdout)
   assert.equal(narratedSummary.lineCount, 1)
@@ -67,4 +70,5 @@ try {
   console.log(JSON.stringify({ package: filename, duration: summary.duration, existingPageDuration: pageSummary.duration, narratedDuration: narratedSummary.duration }))
 } finally {
   await rm(directory, { recursive: true, force: true })
+  await rm(elsewhere, { recursive: true, force: true })
 }

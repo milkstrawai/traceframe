@@ -15,8 +15,11 @@ import { raceAbort } from './deadline.mjs'
 import { TraceframeError } from './errors.mjs'
 import { createNarration } from './narration.mjs'
 
-// The phonon-tts version voice is tested with. Projects install it themselves (see phononDirectory).
+// The phonon-tts version voice is tested with. It is installed beside Traceframe, not in the project being recorded
+// (see phononDirectory).
 export const PHONON_VERSION = createRequire(import.meta.url)('../package.json').devDependencies['phonon-tts']
+// The two ways to run Traceframe with it, for errors.
+const PHONON_INSTALL = `record with \`npx -p traceframe -p phonon-tts@${PHONON_VERSION} traceframe record ...\`, or install both once with \`npm install -g traceframe phonon-tts@${PHONON_VERSION}\``
 // Phonon 31m (English, Apache-2.0) at a fixed revision, with each file's SHA-256.
 const MODEL = {
   repository: 'gradium/phonon-31m-en',
@@ -90,10 +93,9 @@ function voiceFailed(error) {
   throw new TraceframeError(`Voice failed: ${error.message}`, { code: 'VOICE_FAILED', cause: error })
 }
 
-// Traceframe's own location finds an install beside it, in a project or globally. The working directory finds one
-// in the project when Traceframe runs through npx.
+// Traceframe's own location finds phonon-tts installed beside it: in the same npx run, globally, or in a project that
+// installs Traceframe. The working directory still finds one installed in the project, as Traceframe 0.8 asked.
 function phononDirectory() {
-  const install = `npm install -D phonon-tts@${PHONON_VERSION}`
   for (const base of [import.meta.url, pathToFileURL(join(process.cwd(), 'index.js'))]) {
     const require = createRequire(base)
     let path
@@ -104,11 +106,11 @@ function phononDirectory() {
     }
     const { version } = require(path)
     if (version !== PHONON_VERSION) {
-      throw new TraceframeError(`Voice needs phonon-tts ${PHONON_VERSION}, but ${version} is installed. Run \`${install}\`, then record again.`, { code: 'VOICE_RUNTIME_MISSING' })
+      throw new TraceframeError(`Voice needs phonon-tts ${PHONON_VERSION}, but ${version} is installed in ${dirname(path)}. Update it there, or ${PHONON_INSTALL}.`, { code: 'VOICE_RUNTIME_MISSING' })
     }
     return dirname(path)
   }
-  throw new TraceframeError(`Voice needs the phonon-tts package. Run \`${install}\` in your project, then record again.`, { code: 'VOICE_RUNTIME_MISSING' })
+  throw new TraceframeError(`Voice needs the phonon-tts package installed beside Traceframe: ${PHONON_INSTALL}. A project that installs Traceframe needs phonon-tts@${PHONON_VERSION} there too.`, { code: 'VOICE_RUNTIME_MISSING' })
 }
 
 // The model is data, so it downloads by itself on first use, into the user's cache.

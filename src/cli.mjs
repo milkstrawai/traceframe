@@ -53,9 +53,11 @@ The flow module must export a default function. It may also export
 ready({ page, signal }) to establish state before capture and initialPointer
 { x, y } to set where the cursor starts.
 The flow helpers are move(), hover(), click(), scroll(), wait(), and say().
-Export voice = true to speak and caption each say() line; voice needs
-\`npm install -D phonon-tts@${PHONON_VERSION}\`. A flow may contain at most
-${LIMITS.maxMoves} move events and ${LIMITS.maxClicks} click events.
+Export voice = true to speak and caption each say() line. Voice needs
+phonon-tts beside Traceframe, not in your project: run
+\`npx -p traceframe -p phonon-tts@${PHONON_VERSION} traceframe record ...\`, or
+\`npm install -g traceframe phonon-tts@${PHONON_VERSION}\` once.
+A flow may contain at most ${LIMITS.maxMoves} move events and ${LIMITS.maxClicks} click events.
 Each duration, dwell, and wait is at most ${LIMITS.maxActionDuration} seconds.
 `
 

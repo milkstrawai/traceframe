@@ -135,13 +135,18 @@ Write the result to flow.mjs and explain how to run it.
 
 ## Add a voice-over
 
-A flow can narrate itself. Traceframe speaks each line with [Phonon](https://huggingface.co/gradium/phonon-31m-en), a small English text-to-speech model that runs on your machine, and captions it in the video. Install its browser package in your project once:
+A flow can narrate itself. Traceframe speaks each line with [Phonon](https://huggingface.co/gradium/phonon-31m-en), a small English text-to-speech model that runs on your machine, and captions it in the video. The speech runs in the `phonon-tts` package, installed beside Traceframe rather than in your project. With `npx`, name both packages:
 
 ```sh
-npm install -D phonon-tts@0.7.1
+npx -p traceframe -p phonon-tts@0.7.1 traceframe record \
+  --url http://localhost:3000 \
+  --flow ./flow.mjs \
+  --out ./demo.mp4
 ```
 
-Then export `voice` from the flow and call `say()`:
+With a global Traceframe, install both once with `npm install -g traceframe phonon-tts@0.7.1`.
+
+In the flow, export `voice` and call `say()`:
 
 ```js
 export const voice = true
@@ -175,7 +180,7 @@ With `recordPage`, pass `voice: true` or `voice: { captions: false }`; voice use
 
 With [`audio`](#add-audio) as well, such as the page's own sound, the narration plays over it. While each line is spoken, the audio is turned down just enough to sit 18 dB below the voice, and stays down between lines less than a second apart. Audio already that quiet is left as it is, and audio is never turned up.
 
-Without `phonon-tts`, or with another version of it, Traceframe stops before recording with `VOICE_RUNTIME_MISSING` and the install command. With `npx`, install it in the project you run from; with a global Traceframe, install it globally. A failed model download or speech failure stops with `VOICE_FAILED`.
+Without `phonon-tts` beside it, or with another version of it, Traceframe stops before recording with `VOICE_RUNTIME_MISSING` and the commands to install it. A failed model download or speech failure stops with `VOICE_FAILED`.
 
 ## Programmatic usage
 
@@ -184,6 +189,8 @@ To call Traceframe from JavaScript, install it in your project:
 ```sh
 npm install traceframe
 ```
+
+For a [voice-over](#add-a-voice-over), also run `npm install phonon-tts@0.7.1` there.
 
 ```js
 import { record } from 'traceframe'
