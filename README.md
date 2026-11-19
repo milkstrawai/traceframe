@@ -8,7 +8,7 @@ https://github.com/user-attachments/assets/38e02cd5-a9ba-4f3c-938c-159955353141
 
 ## Prerequisites
 
-Traceframe requires Node.js 22+ and system FFmpeg 5+ with `libx264` and `ffprobe` to render the MP4 (for example, `brew install ffmpeg` or `sudo apt install ffmpeg`). Install Chromium with the exact Playwright version Traceframe uses; other cached versions are not used:
+Traceframe requires Node.js 22+ and system FFmpeg 5+ with `ffprobe`, `libx264`, the `lavfi` input device and the `movie` filter. For example, install FFmpeg with `brew install ffmpeg` or `sudo apt install ffmpeg`. Install Chromium with the exact Playwright version Traceframe uses; other cached versions are not used:
 
 ```sh
 npx playwright@1.64.1 install --only-shell chromium

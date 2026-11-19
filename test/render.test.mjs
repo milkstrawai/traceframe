@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 import { probeFfmpeg, runCommand } from '../src/ffmpeg.mjs'
 import { createJpegCapture } from '../src/jpeg-capture.mjs'
-import { buildFilterScript, duckUnderVoice, renderVideo } from '../src/render.mjs'
+import { buildRenderFilters, duckUnderVoice, renderVideo } from '../src/render.mjs'
 
 test('draws one cursor segment per move and one pulse per click', () => {
   const trace = { initialPointer: { x: 10, y: 20 }, moves: [], clicks: [] }
@@ -17,7 +17,7 @@ test('draws one cursor segment per move and one pulse per click', () => {
     trace.clicks.push({ at: index + 0.75, point: to })
     from = to
   }
-  const script = buildFilterScript({ trace, scale: 1, fps: 60, overlayEofAction: 'pass' })
+  const { script } = buildRenderFilters({ rawPath: 'capture.mkv', trace, scale: 1, fps: 60, overlayEofAction: 'pass' })
   assert.match(script, /split=4\[cursor0\]\[cursor1\]\[cursor2\]\[cursor3\]/)
   assert.match(script, /\[2:v\]format=rgba,split=3\[pulse0\]\[pulse1\]\[pulse2\]/)
   assert.deepEqual(script.match(/\[click\d+\]overlay/g), ['[click0]overlay', '[click1]overlay', '[click2]overlay'])
@@ -30,8 +30,9 @@ test('draws one cursor segment per move and one pulse per click', () => {
 test('draws captions over the page and under the click pulses and cursor', () => {
   const trace = { initialPointer: { x: 10, y: 20 }, moves: [{ at: 0, duration: 0.5, from: { x: 10, y: 20 }, to: { x: 50, y: 60 } }], clicks: [{ at: 1, point: { x: 50, y: 60 } }] }
   const captions = [{ path: 'one.png', start: 0.5, end: 1.5, x: 10, y: 20 }, { path: 'two.png', start: 2, end: 3.25, x: 30, y: 40 }]
-  const script = buildFilterScript({ trace, scale: 1, fps: 60, audio: { offset: 0 }, captions, overlayEofAction: 'pass' })
-  assert.match(script, /^\[0:v\][^;]*fps=60\[page0\];\[4:v\]format=yuva444p,setpts=PTS-STARTPTS\+0\.5\/TB\[caption0\];/)
+  const { captureGraph, script } = buildRenderFilters({ rawPath: 'capture.mkv', trace, scale: 1, fps: 60, audio: { offset: 0 }, captions, overlayEofAction: 'pass' })
+  assert.match(captureGraph, /fps=60$/)
+  assert.match(script, /^\[0:v\]null\[page0\];\[4:v\]format=yuva444p,setpts=PTS-STARTPTS\+0\.5\/TB\[caption0\];/)
   assert.match(script, /\[page0\]\[caption0\]overlay=x=10:y=20:eof_action=pass:format=yuv444:enable='between\(t,0\.5,1\.5\)'\[page1\]/)
   assert.match(script, /\[5:v\][^;]*\+2\/TB\[caption1\];\[page1\]\[caption1\]overlay=x=30:y=40:[^;]*'between\(t,2,3\.25\)'\[video0\]/)
   assert.ok(script.indexOf('[video0]') < script.indexOf('[click0]'))
@@ -39,7 +40,8 @@ test('draws captions over the page and under the click pulses and cursor', () =>
 })
 
 test('shows a caption only while its line is spoken', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'traceframe-caption-'))
+  // These path characters also have meaning in an FFmpeg filter graph.
+  const directory = await mkdtemp(join(tmpdir(), "traceframe-caption's [clip],part;-"))
   try {
     const width = 160, height = 120, fps = 30
     const rawPath = join(directory, 'capture.mkv'), image = join(directory, 'caption.png'), white = join(directory, 'white.jpg')
@@ -171,8 +173,11 @@ test('full-range Chrome JPEGs retain gray levels and match limited-range input u
         trace: { initialPointer: { x: 70, y: 120 }, moves: [], clicks: [{ at: 0.05, point: { x: 240, y: 140 } }], end: 0.2 },
         config: { video: { width, height, fps }, scale: 1, postRoll: 0.1, output },
       })
-      const { stdout } = await runCommand('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=pix_fmt,color_range', '-of', 'json', output])
-      assert.deepEqual(JSON.parse(stdout).streams[0], { pix_fmt: 'yuv420p', color_range: 'tv' })
+      const { stdout } = await runCommand('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=pix_fmt,color_range,chroma_location', '-of', 'json', output])
+      const { pix_fmt, color_range, chroma_location } = JSON.parse(stdout).streams[0]
+      assert.equal(pix_fmt, 'yuv420p')
+      assert.equal(color_range, 'tv')
+      if (ffmpeg.major === 5 && input === rawPath) assert.equal(chroma_location, 'center', 'keep JPEG chroma siting through lavfi')
       const pixelsPath = join(directory, `pixels-${index}.rgb`)
       await runCommand('ffmpeg', ['-v', 'error', '-i', output, '-ss', '0.1', '-frames:v', '1', '-pix_fmt', 'rgb24', '-f', 'rawvideo', pixelsPath])
       const pixels = await readFile(pixelsPath)
