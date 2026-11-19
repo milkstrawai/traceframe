@@ -171,15 +171,18 @@ export default async function ({ page, click, say }) {
 | --- | --- |
 | `during` | A function to run while the line is spoken, such as `() => click(open)`. Pass it as the second argument or as `{ during }`. `say()` returns when both are done, and rejects as soon as it fails; a line still being spoken is then left out. Lines are spoken one at a time, so a `say()` inside it is spoken after this line. |
 | `click`, `on` | Click a locator as the line says `on`: the first match of that word or words, ignoring case. `duration` and `dwell` work as for `click()`. |
+| `captionText` | Display different text while speaking the original line, for example `say('sixty-three cents', { captionText: '$0.63' })`. Word-synced clicks still match the spoken text. |
 | `caption` | `'top'` or `'bottom'`, to fix where this line's caption goes. |
 
 Phonon gives no word timings, so Traceframe estimates where the word starts (within about 0.15 seconds in tests) and presses as it is said. If the pointer needs longer to reach the target than the line takes to reach the word, the line starts that much later.
 
-Phonon reads numbers and common abbreviations; if it says a name wrongly, spell it the way it sounds. Speech counts toward the flow timeout. The first narrated take downloads the 65 MB model into `~/.cache/traceframe` (`$XDG_CACHE_HOME/traceframe` when set); later takes need no network. `phonon-tts` is MIT or Apache-2.0, and the model is Apache-2.0.
+Phonon reads numbers and common abbreviations; if it mispronounces a name, spell it the way it sounds in the spoken line and use `captionText` for the correct spelling. Speech counts toward the flow timeout. The first narrated take downloads the 65 MB model into `~/.cache/traceframe` (`$XDG_CACHE_HOME/traceframe` when set); later takes need no network. `phonon-tts` is MIT or Apache-2.0, and the model is Apache-2.0.
 
 Each caption shows while its line is spoken, in the [recording guide's caption style](docs/recording-flows.md#add-captions-and-reading-time). It sits at the bottom, unless there it would cover the element the pointer is using or heading for, or the moving pointer, and the top would cover less. It cannot see what appears on its own, such as a toast; use `caption: 'top'` for that line. A long line gets smaller type; one too long to fit even then stops the recording with `INVALID_FLOW`. To turn captions off, export `voice = { captions: false }`.
 
-With `recordPage`, pass `voice: true` or `voice: { captions: false }`; voice uses Playwright's Chromium, or `CHROME_PATH` when set. With voice enabled, the summary includes `lineCount` and a `lines` array in spoken order. Each entry contains `{ text, start, end, overrun }`. Start and end are seconds from the first video frame and cover the synthesized audio, excluding the trailing pause. If a `during` action finishes after its line, `overrun` gives the extra seconds and Traceframe writes a warning to stderr. Otherwise `overrun` is zero. The summary includes `audio: true` once a line was spoken.
+With `recordPage`, pass `voice: true` or `voice: { captions: false }`. Voice uses Playwright's Chromium, or `CHROME_PATH` when set.
+
+With voice enabled, the CLI, `record()` and `recordPage()` include `lineCount` and a `lines` array in their recording summaries. The entries are in spoken order. Each contains `{ text, start, end, overrun }` and the supplied `captionText` when present. Start and end are seconds from the first video frame and cover the synthesized audio, excluding the trailing pause. If a `during` action finishes after its line, `overrun` gives the extra seconds and Traceframe writes a warning to stderr. Otherwise `overrun` is zero. The summary includes `audio: true` once a line was spoken.
 
 With [`audio`](#add-audio) as well, such as the page's own sound, the narration plays over it. While each line is spoken, the audio is turned down just enough to sit 18 dB below the voice, and stays down between lines less than a second apart. Audio already that quiet is left as it is, and audio is never turned up.
 

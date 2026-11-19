@@ -115,6 +115,10 @@ test('refuses a say() it cannot follow', async () => {
   await assert.rejects(say(LINE, { on: 'Save' }), { code: 'INVALID_FLOW', message: /both click and on/ })
   await assert.rejects(say(LINE, { click: {} }), { code: 'INVALID_FLOW', message: /both click and on/ })
   await assert.rejects(say(LINE, { click: {}, on: 'Cancel' }), { code: 'INVALID_FLOW', message: /"Cancel" is not in/ })
+  for (const captionText of ['', ' ', null, 5]) {
+    await assert.rejects(say(LINE, { captionText }), { code: 'INVALID_FLOW', message: /captionText/ })
+  }
+  await assert.rejects(say(LINE, { captionText: 'Apply change', click: {}, on: 'Apply' }), { code: 'INVALID_FLOW', message: /is not in/ })
   await assert.rejects(say(LINE, { caption: 'left' }), { code: 'INVALID_FLOW', message: /top or bottom/ })
 })
 
@@ -171,16 +175,18 @@ test('lays the lines out on one track and places each caption', async () => {
     // Then an element in use sits where the captions would go at the bottom: the third moves to the top, but the
     // flow asks for the bottom for the second.
     trace.targets.push({ at: secondsSince(clock), box: { x: 560, y: 690, width: 160, height: 40 } })
-    await say('Two.', { caption: 'bottom' })
+    await say('Two.', { caption: 'bottom', captionText: '2' })
     await say('Three.')
     const viewport = { width: 1280, height: 800 }
     const { audio, captions } = await narration.finish({ directory, trace, viewport, scale: 2, captions: true })
 
-    assert.deepEqual(drawn, { texts: ['One.', 'Two.', 'Three.'], viewport, scale: 2, paths: captions.map((caption) => caption.path) })
+    assert.deepEqual(drawn, { texts: ['One.', '2', 'Three.'], viewport, scale: 2, paths: captions.map((caption) => caption.path) })
     assert.deepEqual(captions.map(({ x, y }) => ({ x, y })), [{ x: 752, y: 1382 }, { x: 952, y: 1382 }, { x: 952, y: 16 }])
     assert.ok(captions.every(({ start, end }) => Math.abs(end - start - 0.5) < 1e-9))
     // The track says when each line is spoken, for turning other audio down under it.
     assert.deepEqual(audio.spoken.map(({ start, end }) => ({ start, end })), captions.map(({ start, end }) => ({ start, end })))
+    assert.equal(audio.spoken[1].text, 'Two.')
+    assert.equal(audio.spoken[1].captionText, '2')
     // Each line is loud where it was placed and the track is quiet between the lines.
     const pcm = join(directory, 'narration.pcm')
     await runCommand('ffmpeg', ['-v', 'error', '-i', audio.path, '-ac', '1', '-ar', String(RATE), '-f', 's16le', pcm])

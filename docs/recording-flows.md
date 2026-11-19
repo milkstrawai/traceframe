@@ -103,7 +103,7 @@ Set a Playwright timeout explicitly when an individual operation may exceed its 
 
 ## Add captions and reading time
 
-For a narrated video, use [`say()`](../README.md#add-a-voice-over) instead of the caption recipe below: the speech sets the reading time, and Traceframe draws the captions. Write each line as you would say it, in one or two short sentences, and run its actions in `during`. Listen to the first take, and respell any name the voice says wrongly.
+For a narrated video, use [`say()`](../README.md#add-a-voice-over) instead of the caption recipe below: the speech sets the reading time, and Traceframe draws the captions. Write each line as you would say it, in one or two short sentences, and run its actions in `during`. If the voice mispronounces a name, respell it in the spoken line and pass `captionText` with the correct spelling.
 
 For a review video, explain what the viewer should notice. Show the caption, pause before moving the pointer, perform the action, then hold the result. Start with about 12 characters per second and a 2.5-second minimum for reading, followed by a 2.5–4 second result hold.
 

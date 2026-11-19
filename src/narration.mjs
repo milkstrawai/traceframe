@@ -26,7 +26,7 @@ export function createNarration({ rate, speak, drawCaptions }) {
     let turn = Promise.resolve()
 
     // Starts a line's speech and its action together.
-    function startLine(text, { during, target, index, duration, dwell, caption }) {
+    function startLine(text, { during, target, index, duration, dwell, caption, captionText }) {
       flowSignal?.throwIfAborted()
       const calledAt = secondsSince(clock)
       const audio = speak(text)
@@ -34,7 +34,7 @@ export function createNarration({ rate, speak, drawCaptions }) {
       const stop = new AbortController()
       const signal = flowSignal ? AbortSignal.any([flowSignal, stop.signal]) : stop.signal
       const sleepUntil = (seconds, options) => delay(Math.max(0, seconds - secondsSince(clock)) * 1000, undefined, { signal, ...options })
-      const line = { text, caption }
+      const line = { text, caption, captionText }
       const action = Promise.resolve().then(during).finally(() => {
         if (typeof during === 'function') line.actionEndedAt = secondsSince(clock)
       })
@@ -72,13 +72,16 @@ export function createNarration({ rate, speak, drawCaptions }) {
     }
 
     return async function say(text, options = {}) {
-      const { during, click: target, on, duration, dwell, caption } = typeof options === 'function' ? { during: options } : options
+      const { during, click: target, on, duration, dwell, caption, captionText } = typeof options === 'function' ? { during: options } : options
       if (typeof text !== 'string' || !text.trim()) throw new TraceframeError('say() needs the text to speak.', { code: 'INVALID_FLOW' })
       if ((target === undefined) !== (on === undefined)) throw new TraceframeError('say() needs both click and on to click as a word is said.', { code: 'INVALID_FLOW' })
       const index = on === undefined ? undefined : wordIndex(text, on)
       if (index < 0) throw new TraceframeError(`say() can click only on a word in the line: "${on}" is not in "${text}".`, { code: 'INVALID_FLOW' })
       if (![undefined, 'top', 'bottom'].includes(caption)) throw new TraceframeError('say() caption must be top or bottom.', { code: 'INVALID_FLOW' })
-      const line = turn.then(() => startLine(text, { during, target, index, duration, dwell, caption }))
+      if (captionText !== undefined && (typeof captionText !== 'string' || !captionText.trim())) {
+        throw new TraceframeError('say() captionText must be a non-empty string.', { code: 'INVALID_FLOW' })
+      }
+      const line = turn.then(() => startLine(text, { during, target, index, duration, dwell, caption, captionText }))
       turn = line.then(({ speech, audio }) => Promise.allSettled([speech, audio])).catch(() => {})
       const { speech, action } = await line
       await Promise.all([speech, action])
@@ -91,18 +94,18 @@ export function createNarration({ rate, speak, drawCaptions }) {
     const track = new Float32Array(Math.max(...lines.map((line) => Math.round(line.start * rate) + line.samples.length)))
     for (const line of lines) track.set(line.samples, Math.round(line.start * rate))
     // The result, captions and audio mix all use the same intervals on the recording clock.
-    const spoken = lines.map(({ text, start, samples, actionEndedAt }, index) => {
+    const spoken = lines.map(({ text, captionText, start, samples, actionEndedAt }, index) => {
       const end = start + samples.length / rate
       const overrun = Math.max(0, Math.round(((actionEndedAt ?? end) - end) * 1000) / 1000)
       if (overrun > 0) console.error(`traceframe: The during action for narration line ${index + 1} finished ${overrun} s after the line ended.`)
-      return { text, start, end, overrun }
+      return { text, start, end, overrun, ...(captionText !== undefined ? { captionText } : {}) }
     })
     const audio = { path: runFiles(directory).narration, spoken }
     await runCommand('ffmpeg', ['-v', 'error', '-y', '-f', 'f32le', '-ar', String(rate), '-ac', '1', '-i', 'pipe:0', '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11', '-ar', '48000', audio.path], { signal, input: new Uint8Array(track.buffer) })
     if (!captions) return { audio }
 
     const paths = lines.map((_, index) => join(directory, `caption-${index}.png`))
-    const drawing = drawCaptions({ texts: lines.map((line) => line.text), viewport, scale, paths })
+    const drawing = drawCaptions({ texts: lines.map((line) => line.captionText ?? line.text), viewport, scale, paths })
     const drawn = await (signal ? raceAbort(drawing, signal) : drawing)
     return {
       audio,
