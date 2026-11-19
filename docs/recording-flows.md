@@ -73,7 +73,7 @@ For a target clipped by a scrollable panel or covered by a sticky header, try `a
 
 Both automatic scrolling and `scroll(target)` can move the outer page, which closes some lists. For those lists, use their own scrolling container through Playwright, for example `await list.evaluate((element) => element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' }))` to show the final options, then click the option. Wait for any opening animation before scrolling.
 
-To show a result without a pointer action, use `await scroll(result)`. Centering a result taller than the view hides its start, so scroll to its heading or another element near its start instead.
+To show a result without a pointer action, use `await scroll(result)`. For a result taller than the view, use `await scroll(result, { block: 'start' })` to show its heading or `{ block: 'end' }` to show its final rows.
 
 Focus a field visibly, then type with a delay in milliseconds:
 

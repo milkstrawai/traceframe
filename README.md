@@ -93,7 +93,7 @@ The default function receives a Playwright `page`, an `AbortSignal` named `signa
 | `move({ x, y }, { duration })` | Move the pointer to viewport coordinates. |
 | `hover(locator, { duration })` | Move the pointer to a locator. |
 | `click(locator, { duration, dwell })` | Move, pause, and click a locator. |
-| `scroll(locator)` | Center a target without moving the pointer. |
+| `scroll(locator, { block })` | Scroll a target into view without moving the pointer. |
 | `mark(name)` | Save a named timestamp in the recording summary. |
 | `wait(seconds)` | Pause for reading time. |
 | `say(text, options)` | Speak a line and caption it; see [voice-over](#add-a-voice-over). |
@@ -106,7 +106,9 @@ Error messages name the locator; give it a clearer name with Playwright's `locat
 
 `click` and `hover` scroll automatically only when their aim point starts outside the viewport. They scroll smoothly through the page, scrollable containers, and iframes, and wait for scrolling to stop before moving the pointer.
 
-`scroll(target)` smoothly centers the target vertically, even if it is already visible, and waits for scrolling to stop without moving the pointer. Use it to show a result or before clicking a target clipped by a scrollable panel or covered by a sticky header. Wait for a dialog or toast to close instead.
+`scroll(target)` smoothly centers the target vertically, even if it is already visible, and waits for scrolling to stop without moving the pointer. Pass `{ block: 'start' }` to frame a section's beginning or `{ block: 'end' }` to frame its ending. The default is `'center'`. The available scroll range can limit alignment near a page or panel boundary. A sticky header can cover a start-aligned heading. Set `scroll-margin-top` on the heading when you control the page. Use `scroll` to show a result or before clicking a target clipped by a scrollable panel or covered by a sticky header. Wait for a dialog or toast to close instead.
+
+A layout change after the smooth scroll settles can require an immediate adjustment. If the page keeps moving or replacing the target during these adjustments, `scroll()` stops with `FLOW_TARGET_MOVED`.
 
 Centering can leave a target partly visible or covered, for example by a sticky bar taller than half the height of the viewport or its scrolling panel. It cannot reveal content hidden by `overflow: clip`. `click` fails with `FLOW_TARGET_OBSCURED` if the target is still covered when it presses.
 
