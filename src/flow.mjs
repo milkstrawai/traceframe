@@ -47,7 +47,7 @@ function voiceSettings(voice) {
 // milliseconds of the first video frame. Targets ({ at, box }) are the elements the pointer sets off for, which
 // captions keep clear of; one without a box, from move() or scroll(), ends the one before.
 export function createTrace(initialPointer) {
-  return { initialPointer, moves: [], clicks: [], targets: [] }
+  return { initialPointer, moves: [], clicks: [], targets: [], marks: [] }
 }
 
 export function secondsSince(clock) {
@@ -157,6 +157,12 @@ export function createFlowApi({ page, trace, clock, viewport, signal, narration 
       const { shown } = await reveal((await findTarget(locator, signal, handles)).element, locator, signal, handles)
       if (!shown) throw new TraceframeError(`${locator} could not be revealed by scrolling.`, { code: 'FLOW_TARGET_OUTSIDE_VIEWPORT' })
     }),
+    mark(name) {
+      // A listener on a caller-owned page can outlive the flow, even after a failed take.
+      if (trace.end !== undefined || signal?.aborted) return
+      if (typeof name !== 'string' || !name.trim()) throw new TraceframeError('mark() needs a non-empty name.', { code: 'INVALID_FLOW' })
+      trace.marks.push({ name, at: Math.max(0, secondsSince(clock)) })
+    },
     async wait(seconds) {
       await sleep(durationSeconds(seconds, 'wait', { allowZero: true }) * 1000)
     },

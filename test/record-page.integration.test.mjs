@@ -67,6 +67,27 @@ for (const scale of [1, 2]) {
   })
 }
 
+test('later activity on the caller page leaves the finished take’s marks intact', async () => {
+  await withPage(async ({ page, options }) => {
+    const controller = new AbortController()
+    const result = await recordPage({ ...options, signal: controller.signal, flow: ({ mark }) => {
+      mark('ready')
+      queueMicrotask(() => mark('after return'))
+      page.once('framenavigated', () => mark('navigation'))
+    } })
+    controller.abort()
+    await page.goto('about:blank')
+    assert.deepEqual(result.marks.map(({ name }) => name), ['ready'])
+
+    let lateMark
+    await assert.rejects(recordPage({ ...options, flow: ({ mark }) => {
+      lateMark = mark
+      throw new Error('failed take')
+    } }), { code: 'FLOW_FAILED' })
+    assert.doesNotThrow(() => lateMark())
+  })
+})
+
 test('records from a persistent context and leaves it usable', { timeout: 30_000 }, async () => {
   await withPage(async ({ page, context, options }) => {
     const result = await recordPage({ ...options, flow: async ({ click }) => click(page.getByRole('button'), { duration: 0.01, dwell: 0 }) })

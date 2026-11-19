@@ -93,18 +93,24 @@ export async function captureFlow({ config, flow, directory, page, narration, si
       // Rejected caller-page attempts must leave the caller's pointer alone.
       await page.mouse.move(trace.initialPointer.x, trace.initialPointer.y)
     }
-    try {
-      await withDeadline(
-        (flowSignal) => flow.run({ page, signal: flowSignal, ...createFlowApi({ page, trace, clock, viewport: config.viewport, signal: flowSignal, narration }) }),
-        config.flowTimeout * 1000,
-        new TraceframeError(`Flow exceeded the ${config.flowTimeout}-second flow timeout. Raise it with the flowTimeout option, or --flow-timeout.`, { code: 'FLOW_TOO_LONG' }),
-        signal,
-      )
-    } catch (error) {
-      if (signal.aborted || error instanceof TraceframeError) throw error
-      throw new TraceframeError(error instanceof Error ? error.message : String(error), { code: 'FLOW_FAILED', cause: error })
-    }
-    trace.end = secondsSince(clock)
+    await withDeadline(
+      async (flowSignal) => {
+        try {
+          const api = createFlowApi({ page, trace, clock, viewport: config.viewport, signal: flowSignal, narration })
+          const result = flow.run({ page, signal: flowSignal, ...api })
+          // A synchronous flow must close its marks before queued microtasks run.
+          if (typeof result?.then === 'function') await result
+        } catch (error) {
+          if (flowSignal.aborted || error instanceof TraceframeError) throw error
+          throw new TraceframeError(error instanceof Error ? error.message : String(error), { code: 'FLOW_FAILED', cause: error })
+        } finally {
+          trace.end = secondsSince(clock)
+        }
+      },
+      config.flowTimeout * 1000,
+      new TraceframeError(`Flow exceeded the ${config.flowTimeout}-second flow timeout. Raise it with the flowTimeout option, or --flow-timeout.`, { code: 'FLOW_TOO_LONG' }),
+      signal,
+    )
     await delay(config.postRoll * 1000, undefined, { signal })
     // Stop the page subscription only once, including when shutdown fails.
     recording = false

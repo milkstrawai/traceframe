@@ -63,15 +63,18 @@ async function recordFlow({ config, flow, signal, page }) {
     const narrated = narration ? await narration.finish({ directory, trace, viewport: config.viewport, scale: config.scale, captions: flow.voice.captions, signal }) : {}
     await narration?.close()
     const duration = await renderVideo({ rawPath, trace, directory, config, ffmpeg, signal, audio, narration: narrated.audio, captions: narrated.captions })
+    const lines = narrated.audio?.spoken ?? []
     return {
       output: config.output,
       width: config.video.width,
       height: config.video.height,
       fps: config.video.fps,
       duration,
+      startedAt: capture.startedAt,
+      marks: trace.marks,
       moveCount: trace.moves.length,
       clickCount: trace.clicks.length,
-      ...(narration ? { lineCount: narration.lines.length } : {}),
+      ...(narration ? { lineCount: lines.length, lines } : {}),
       graphics: capture.graphics,
       runDirectory: config.runDirectory,
       ...(audio || narrated.audio ? { audio: true } : {}),

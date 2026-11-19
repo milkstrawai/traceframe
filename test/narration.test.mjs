@@ -49,6 +49,26 @@ test('speaks from the call and returns after the speech, a short gap and the act
 // "then" starts 1.35 seconds into this clip, about where the text alone puts it.
 const THEN_AT_1_35 = clip(0.25, 0.8, 0.3, 0.9, 0.4)
 
+test('compares the action completion with the mixed audio interval, even during the gap or a slow synthesis', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'traceframe-timing-'))
+  t.after(() => rm(directory, { recursive: true, force: true }))
+  const warn = t.mock.method(console, 'error', () => {})
+  const { narration, say, clock } = setup({ clips: { 'Short.': clip(0, 0.1) }, latency: 0.6 })
+  let finished
+  await say('Short.', async () => { await delay(220); finished = secondsSince(clock) })
+  await say('Short.', () => {})
+  // The synced click delays this line well past the end of its during action.
+  await say('Short.', { click: {}, on: 'Short', duration: 0.4, during: () => delay(220) })
+  const { audio: { spoken } } = await narration.finish({ directory, captions: false })
+  assert.equal(spoken.length, 3)
+  assert.ok(spoken[0].overrun > 0.1)
+  assert.ok(Math.abs(spoken[0].end + spoken[0].overrun - finished) < 0.02)
+  assert.equal(spoken[1].overrun, 0)
+  assert.equal(spoken[2].overrun, 0)
+  assert.equal(warn.mock.callCount(), 1)
+  assert.match(warn.mock.calls[0].arguments[0], /during action for narration line 1/)
+})
+
 test('presses as the clicked word is said', async () => {
   const { narration, say, clicks, clock } = setup({ clips: { [LINE]: THEN_AT_1_35 }, elapsed: 5 })
   const calledAt = secondsSince(clock)
@@ -160,7 +180,7 @@ test('lays the lines out on one track and places each caption', async () => {
     assert.deepEqual(captions.map(({ x, y }) => ({ x, y })), [{ x: 752, y: 1382 }, { x: 952, y: 1382 }, { x: 952, y: 16 }])
     assert.ok(captions.every(({ start, end }) => Math.abs(end - start - 0.5) < 1e-9))
     // The track says when each line is spoken, for turning other audio down under it.
-    assert.deepEqual(audio.spoken, captions.map(({ start, end }) => ({ start, end })))
+    assert.deepEqual(audio.spoken.map(({ start, end }) => ({ start, end })), captions.map(({ start, end }) => ({ start, end })))
     // Each line is loud where it was placed and the track is quiet between the lines.
     const pcm = join(directory, 'narration.pcm')
     await runCommand('ffmpeg', ['-v', 'error', '-i', audio.path, '-ac', '1', '-ar', String(RATE), '-f', 's16le', pcm])
@@ -181,7 +201,7 @@ test('a line said as the take begins starts at the first frame, even when that f
     const { narration, say } = setup({ clips: { 'One.': clip(0.1, 0.3, 0.1) }, elapsed: -0.05 })
     await say('One.')
     const { audio } = await narration.finish({ directory, captions: false })
-    assert.deepEqual(audio.spoken, [{ start: 0, end: 0.5 }])
+    assert.deepEqual(audio.spoken, [{ text: 'One.', start: 0, end: 0.5, overrun: 0 }])
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

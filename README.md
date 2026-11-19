@@ -86,7 +86,7 @@ The optional `ready({ page, signal })` hook runs after initial navigation and be
 
 ### Helpers
 
-The default function receives a Playwright `page`, an `AbortSignal` named `signal`, and six helpers:
+The default function receives a Playwright `page`, an `AbortSignal` named `signal`, and these helpers:
 
 | Helper | Use |
 | --- | --- |
@@ -94,6 +94,7 @@ The default function receives a Playwright `page`, an `AbortSignal` named `signa
 | `hover(locator, { duration })` | Move the pointer to a locator. |
 | `click(locator, { duration, dwell })` | Move, pause, and click a locator. |
 | `scroll(locator)` | Center a target without moving the pointer. |
+| `mark(name)` | Save a named timestamp in the recording summary. |
 | `wait(seconds)` | Pause for reading time. |
 | `say(text, options)` | Speak a line and caption it; see [voice-over](#add-a-voice-over). |
 
@@ -110,6 +111,8 @@ Error messages name the locator; give it a clearer name with Playwright's `locat
 Centering can leave a target partly visible or covered, for example by a sticky bar taller than half the height of the viewport or its scrolling panel. It cannot reveal content hidden by `overflow: clip`. `click` fails with `FLOW_TARGET_OBSCURED` if the target is still covered when it presses.
 
 ### Timing and limits
+
+The recording summary includes `startedAt`, the first frame's timestamp in epoch milliseconds. Call `mark('Settings opened')` in a flow to save a chapter or editing point. The summary's `marks` array contains `{ name, at }` entries in call order, with `at` in seconds from the first frame. Repeated names are kept. Marks close when a synchronous flow returns or throws, when Traceframe observes an asynchronous flow's promise settle, or when the take is cancelled.
 
 `--ready-timeout` (default: 30 seconds) sets Playwright's default timeout during initial navigation and `ready`, for operations that accept a timeout. It does not set a deadline for the whole hook.
 
@@ -176,7 +179,7 @@ Phonon reads numbers and common abbreviations; if it says a name wrongly, spell 
 
 Each caption shows while its line is spoken, in the [recording guide's caption style](docs/recording-flows.md#add-captions-and-reading-time). It sits at the bottom, unless there it would cover the element the pointer is using or heading for, or the moving pointer, and the top would cover less. It cannot see what appears on its own, such as a toast; use `caption: 'top'` for that line. A long line gets smaller type; one too long to fit even then stops the recording with `INVALID_FLOW`. To turn captions off, export `voice = { captions: false }`.
 
-With `recordPage`, pass `voice: true` or `voice: { captions: false }`; voice uses Playwright's Chromium, or `CHROME_PATH` when set. The summary includes `lineCount`, and `audio: true` once a line was spoken.
+With `recordPage`, pass `voice: true` or `voice: { captions: false }`; voice uses Playwright's Chromium, or `CHROME_PATH` when set. With voice enabled, the summary includes `lineCount` and a `lines` array in spoken order. Each entry contains `{ text, start, end, overrun }`. Start and end are seconds from the first video frame and cover the synthesized audio, excluding the trailing pause. If a `during` action finishes after its line, `overrun` gives the extra seconds and Traceframe writes a warning to stderr. Otherwise `overrun` is zero. The summary includes `audio: true` once a line was spoken.
 
 With [`audio`](#add-audio) as well, such as the page's own sound, the narration plays over it. While each line is spoken, the audio is turned down just enough to sit 18 dB below the voice, and stays down between lines less than a second apart. Audio already that quiet is left as it is, and audio is never turned up.
 
@@ -222,7 +225,7 @@ await recordPage({
 })
 ```
 
-The callback receives the same `page`, `signal` and six helpers as a flow file. It can close over your script's locators and state. See the [runnable existing-page example](examples/existing-page.mjs); in a clone, run `node examples/existing-page.mjs` to save `.traceframe/existing-page.mp4` using synthetic local content.
+The callback receives the same `page`, `signal` and helpers as a flow file. It can close over your script's locators and state. See the [runnable existing-page example](examples/existing-page.mjs); in a clone, run `node examples/existing-page.mjs` to save `.traceframe/existing-page.mp4` using synthetic local content.
 
 Use Playwright 1.64.1 with Chromium, a fixed viewport, 100% browser zoom and an unscaled page. Traceframe checks the page's inner dimensions and visual viewport before starting capture, rejecting unsupported geometry with `CAPTURE_SIZE_MISMATCH`. `recordPage` keeps the page, context and browser open on success, failure and cancellation. It does not navigate, resize, run a `ready` hook, or change page timeouts. Your script owns setup and shutdown. The CLI and `record` continue to create and close their own browser.
 
@@ -238,7 +241,7 @@ If the page uses DOM fullscreen, such as a video player's fullscreen button, Chr
 
 Keep the viewport, zoom and visual scale fixed and the page open until `recordPage` settles. Page geometry is checked at startup. During the take, a frame whose size differs from the first stops recording with `CAPTURE_SIZE_CHANGED`. Only that page is recorded; a tab closed during a take may lose its capture. Use the page exclusively for recording: concurrent screencasts, context `recordVideo` and tracing with screenshots can change frame dimensions or supply stale frames. A size check cannot detect every conflict. Overlapping `recordPage` calls on the same page reject with `PAGE_RECORDING_ACTIVE`.
 
-Await every helper. Helpers observe cancellation before further pointer or scroll actions, and release a mouse button that was already pressed; an already-issued action may still complete. Arbitrary callback code must cooperate with `signal`, including passing it to supported Playwright operations. A flow timeout does not forcibly terminate that code. Sequential takes are supported after a successful screencast stop, including ordinary flow failures and cooperative cancellation. Startup or stop failures may need a new page or context; Traceframe leaves that recovery to the caller and does not stop a pre-existing caller screencast.
+Await each asynchronous helper. The `mark()` helper is synchronous. Helpers observe cancellation before further pointer or scroll actions, and release a mouse button that was already pressed; an already-issued action may still complete. Arbitrary callback code must cooperate with `signal`, including passing it to supported Playwright operations. A flow timeout does not forcibly terminate that code. Sequential takes are supported after a successful screencast stop, including ordinary flow failures and cooperative cancellation. Startup or stop failures may need a new page or context; Traceframe leaves that recovery to the caller and does not stop a pre-existing caller screencast.
 
 Traceframe removes its temporary capture unless `runDirectory` is supplied. For extension pages, use full Chromium; the headless shell alone does not load extensions. This path was checked on Linux with Playwright 1.64.1 and its bundled full Chromium using a synthetic extension.
 

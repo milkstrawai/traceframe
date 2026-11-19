@@ -34,7 +34,10 @@ export function createNarration({ rate, speak, drawCaptions }) {
       const stop = new AbortController()
       const signal = flowSignal ? AbortSignal.any([flowSignal, stop.signal]) : stop.signal
       const sleepUntil = (seconds, options) => delay(Math.max(0, seconds - secondsSince(clock)) * 1000, undefined, { signal, ...options })
-      const action = Promise.resolve().then(during)
+      const line = { text, caption }
+      const action = Promise.resolve().then(during).finally(() => {
+        if (typeof during === 'function') line.actionEndedAt = secondsSince(clock)
+      })
       action.catch((error) => stop.abort(error))
 
       async function speech() {
@@ -61,7 +64,9 @@ export function createNarration({ rate, speak, drawCaptions }) {
         await sleepUntil(start + samples.length / rate + GAP)
         // The first frame's time is Chromium's, which can run ahead of Node's clock, so a line said as the take
         // begins can seem to start before it.
-        lines.push({ text, samples, start: Math.max(0, start), caption })
+        line.start = Math.max(0, start)
+        line.samples = samples
+        lines.push(line)
       }
       return { speech: speech(), audio, action }
     }
@@ -85,8 +90,13 @@ export function createNarration({ rate, speak, drawCaptions }) {
     if (!lines.length) return {}
     const track = new Float32Array(Math.max(...lines.map((line) => Math.round(line.start * rate) + line.samples.length)))
     for (const line of lines) track.set(line.samples, Math.round(line.start * rate))
-    // Each line's start and end, for its caption and for turning other audio down under it.
-    const spoken = lines.map((line) => ({ start: line.start, end: line.start + line.samples.length / rate }))
+    // The result, captions and audio mix all use the same intervals on the recording clock.
+    const spoken = lines.map(({ text, start, samples, actionEndedAt }, index) => {
+      const end = start + samples.length / rate
+      const overrun = Math.max(0, Math.round(((actionEndedAt ?? end) - end) * 1000) / 1000)
+      if (overrun > 0) console.error(`traceframe: The during action for narration line ${index + 1} finished ${overrun} s after the line ended.`)
+      return { text, start, end, overrun }
+    })
     const audio = { path: runFiles(directory).narration, spoken }
     await runCommand('ffmpeg', ['-v', 'error', '-y', '-f', 'f32le', '-ar', String(rate), '-ac', '1', '-i', 'pipe:0', '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11', '-ar', '48000', audio.path], { signal, input: new Uint8Array(track.buffer) })
     if (!captions) return { audio }

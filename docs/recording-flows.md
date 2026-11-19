@@ -286,18 +286,16 @@ Inspect the rendered result with audio enabled, and compare another marker near 
 
 Edit the finished MP4 with FFmpeg rather than changing the flow. Editing finished frames keeps the page and cursor together. Keep the original, and say when a clip's pacing was edited.
 
-To speed up an idle stretch, such as a progress bar, you need its start and end times. Read them in a video player, or log them from the flow; logged times run up to about 0.1 seconds earlier than in the video:
+To speed up an idle stretch, mark its start and end in the flow. The recording summary's `marks` array gives both positions in seconds from the first frame. For narrated sections, `lines` gives the start and end of each spoken line on the same clock.
 
 ```js
-export default async function ({ page, click, wait }) {
-  const started = Date.now()
-  const mark = (label) => console.error(`${label}: ${((Date.now() - started) / 1000).toFixed(2)} s`)
-  // ...
-  mark('progress started')
+export default async function ({ page, click, mark, signal }) {
+  await click(page.getByRole('button', { name: 'Export' }))
+  mark('export started')
+  await page.getByText('Export complete').waitFor({ signal })
+  mark('export finished')
 }
 ```
-
-Log to `console.error`, because Traceframe prints its JSON summary on standard output.
 
 This command plays seconds 2 to 9 at 4× speed. Set `fps` to the video's frame rate: 60 for the default preset, 30 for draft. It drops the audio track; to keep audio synchronized, apply the same cuts and speed changes to its timeline, including when speeding up silent intervals.
 
