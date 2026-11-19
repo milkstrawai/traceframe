@@ -1,7 +1,7 @@
 import { chromium } from 'playwright'
-import { recordPage } from 'traceframe'
+import { chromiumGpuArgs, recordPage } from 'traceframe'
 
-const browser = await chromium.launch()
+const browser = await chromium.launch({ args: chromiumGpuArgs() })
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
   await page.goto(new URL('./recipes.html', import.meta.url).href)

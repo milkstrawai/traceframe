@@ -4,7 +4,8 @@ import fs from 'node:fs/promises'
 import { syncBuiltinESMExports } from 'node:module'
 import { chromium } from 'playwright'
 
-import { launchBrowser } from '../src/browser.mjs'
+import { chromiumGpuArgs } from '../src/index.mjs'
+import { inspectGraphics, launchBrowser } from '../src/browser.mjs'
 
 const hardware = { featureStatus: { gpu_compositing: 'enabled' }, auxAttributes: { glRenderer: 'ANGLE (Test GPU)' } }
 const software = { featureStatus: { gpu_compositing: 'disabled_software' }, auxAttributes: { glRenderer: 'ANGLE (SwiftShader Device)' } }
@@ -16,6 +17,16 @@ const baseArgs = ['--force-device-scale-factor=2', '--window-size=640,480']
 const softwareDecode = '--disable-accelerated-video-decode'
 const gpuArgs = [...baseArgs, '--enable-gpu', ...(linux ? ['--use-angle=gl-egl'] : []), ...(process.platform === 'darwin' ? [] : [softwareDecode])]
 const softwareArgs = [...baseArgs, '--disable-gpu', softwareDecode]
+
+test('exposes the platform GPU flags for caller-owned Chromium launches', () => {
+  assert.deepEqual([...baseArgs, ...chromiumGpuArgs()], gpuArgs)
+  assert.deepEqual([...baseArgs, ...chromiumGpuArgs('off')], softwareArgs)
+  assert.throws(() => chromiumGpuArgs('on'), { code: 'INVALID_CONFIG' })
+})
+
+test('reports an unavailable check when the context has no browser', async () => {
+  assert.deepEqual(await inspectGraphics(null, signal), { hardwareAccelerated: false, fallbackReason: 'graphics-check-unavailable' })
+})
 
 function stub(gpu = hardware) {
   const calls = { closes: 0, detaches: 0 }
@@ -36,6 +47,11 @@ function mockDevices(t, devices = { renderD128: true }) {
   syncBuiltinESMExports()
   t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports() })
 }
+
+test('a caller-owned browser reports software rendering independently of local GPU devices', async (t) => {
+  mockDevices(t, null)
+  assert.deepEqual(await inspectGraphics(stub(software).browser, signal), { hardwareAccelerated: false, fallbackReason: 'software-rendering' })
+})
 
 test('auto keeps a GPU browser whose hardware rendering is verified', async (t) => {
   const s = stub()
@@ -160,6 +176,9 @@ test('cancellation during the graphics check closes the GPU browser and starts n
   const s = stub(), started = Promise.withResolvers()
   const controller = new AbortController(), reason = new Error('stop during graphics check')
   s.session.send = () => { started.resolve(); return new Promise(() => {}) }
+  const order = []
+  s.session.detach = async () => { await new Promise(resolve => setImmediate(resolve)); order.push('detached') }
+  s.browser.close = async () => { order.push('closed') }
   const launch = t.mock.method(chromium, 'launch', async () => s.browser)
   const pending = launchBrowser(config, { handleSignals: true, signal: controller.signal })
   await started.promise
@@ -167,7 +186,26 @@ test('cancellation during the graphics check closes the GPU browser and starts n
   // Rejects at once, not at the 5-second graphics deadline.
   await assert.rejects(pending, error => error === reason)
   assert.equal(launch.mock.callCount(), 1)
-  assert.equal(s.calls.closes, 1)
+  assert.deepEqual(order, ['detached', 'closed'])
+})
+
+test('a stalled detach is bounded and a late-opening session is released', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const s = stub(), detaching = Promise.withResolvers()
+  s.session.detach = () => { detaching.resolve(); return new Promise(() => {}) }
+  const checking = inspectGraphics(s.browser, signal)
+  await detaching.promise
+  t.mock.timers.tick(1000)
+  assert.equal((await checking).hardwareAccelerated, true)
+
+  const opening = Promise.withResolvers(), late = stub()
+  late.browser.newBrowserCDPSession = () => opening.promise
+  const pending = inspectGraphics(late.browser, signal)
+  t.mock.timers.tick(5000)
+  assert.equal((await pending).fallbackReason, 'graphics-check-unavailable')
+  opening.resolve(late.session)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(late.calls.detaches, 1)
 })
 
 test('cancellation during the device check closes the GPU browser and starts no fallback', { skip: !linux }, async (t) => {

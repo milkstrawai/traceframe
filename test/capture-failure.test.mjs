@@ -17,6 +17,7 @@ const frame = (data = jpeg32x24, viewportWidth = 32, viewportHeight = 24) => ({ 
 // A caller page whose screencast delivers one 32×24 frame when it starts.
 function stubPage(screencast) {
   return {
+    context: () => ({ browser: () => null }),
     evaluate: async () => [32, 24, 1, 0, 0], mouse: { move: async () => {} },
     screenshot: async () => Buffer.from('synthetic screenshot'),
     screencast: { async start({ onFrame }) { await onFrame(frame()) }, async stop() {}, ...screencast },

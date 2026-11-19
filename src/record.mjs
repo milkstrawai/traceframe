@@ -72,7 +72,7 @@ async function recordFlow({ config, flow, signal, page }) {
       moveCount: trace.moves.length,
       clickCount: trace.clicks.length,
       ...(narration ? { lineCount: narration.lines.length } : {}),
-      ...(capture.graphics ? { graphics: capture.graphics } : {}),
+      graphics: capture.graphics,
       runDirectory: config.runDirectory,
       ...(audio || narrated.audio ? { audio: true } : {}),
       ...(capture.captureStats ? { captureStats: capture.captureStats } : {}),

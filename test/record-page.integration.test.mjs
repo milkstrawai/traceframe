@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { chromium } from 'playwright'
 
-import { recordPage } from '../src/index.mjs'
+import { chromiumGpuArgs, recordPage } from '../src/index.mjs'
 import { assertDecodes } from './helpers.mjs'
 
 const run = promisify(execFile)
@@ -16,7 +16,7 @@ const html = '<body style="background:#dcecf5"><button style="margin:60px" oncli
 
 async function withPage(check, { scale = 1, deviceScaleFactor = scale, persistent = false, isMobile = false } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'traceframe-page-'))
-  const launch = { args: scale === 2 ? ['--force-device-scale-factor=2'] : [] }
+  const launch = { args: [...chromiumGpuArgs('off'), ...(scale === 2 ? ['--force-device-scale-factor=2'] : [])] }
   const browser = persistent ? undefined : await chromium.launch(launch)
   const context = persistent
     ? await chromium.launchPersistentContext(join(directory, 'profile'), { ...launch, viewport, deviceScaleFactor })
@@ -52,7 +52,8 @@ for (const scale of [1, 2]) {
       assert.equal(result.clickCount, 1)
       assert.equal(result.width, viewport.width * scale)
       assert.equal(result.height, viewport.height * scale)
-      assert.equal('graphics' in result, false)
+      assert.equal(result.graphics.hardwareAccelerated, false)
+      assert.equal(result.graphics.fallbackReason, 'software-rendering')
       assert.equal(page.isClosed(), false)
       assert.equal(page.url(), url)
       assert.deepEqual(page.viewportSize(), viewport)
@@ -68,12 +69,28 @@ for (const scale of [1, 2]) {
 
 test('records from a persistent context and leaves it usable', { timeout: 30_000 }, async () => {
   await withPage(async ({ page, context, options }) => {
-    await recordPage({ ...options, flow: async ({ click }) => click(page.getByRole('button'), { duration: 0.01, dwell: 0 }) })
+    const result = await recordPage({ ...options, flow: async ({ click }) => click(page.getByRole('button'), { duration: 0.01, dwell: 0 }) })
+    assert.equal(result.graphics.fallbackReason, 'software-rendering')
     assert.equal(await page.getByRole('button').textContent(), 'Saved')
     assert.ok(context.pages().includes(page))
     const next = await context.newPage()
     await next.close()
   }, { persistent: true })
+})
+
+test('cancelling the graphics check detaches the session and leaves the caller page usable', async (t) => {
+  await withPage(async ({ page, context, options }) => {
+    const controller = new AbortController()
+    const reason = new Error('cancel graphics check')
+    let detached = false
+    t.mock.method(context.browser(), 'newBrowserCDPSession', async () => ({
+      send() { controller.abort(reason); return new Promise(() => {}) },
+      async detach() { detached = true },
+    }))
+    await assert.rejects(recordPage({ ...options, signal: controller.signal, flow: () => assert.fail('flow started') }), error => error === reason)
+    assert.equal(detached, true)
+    assert.equal(await page.getByRole('button').textContent(), 'Save')
+  })
 })
 
 test('capture quality reaches Chromium and diagnostics describe delivered frames', { timeout: 30_000 }, async () => {
