@@ -216,8 +216,9 @@ function clickFilter(click, index, scale, overlay) {
   const start = number(click.at)
   const end = number(start + CLICK.duration)
   const growth = `(${CLICK.scaleStart}+${CLICK.scaleEnd - CLICK.scaleStart}*clip((t-${start})/${CLICK.duration},0,1))`
+  // FFmpeg 9.1's fade requires fixed-size input. Fade the pulse before animating its size.
   return [
-    `[pulse${index}]setpts=PTS-STARTPTS+${start}/TB,scale=w='iw*${growth}':h='ih*${growth}':eval=frame,fade=t=out:st=${start}:d=${CLICK.duration}:alpha=1[click${index}]`,
+    `[pulse${index}]setpts=PTS-STARTPTS+${start}/TB,fade=t=out:st=${start}:d=${CLICK.duration}:alpha=1,scale=w='iw*${growth}':h='ih*${growth}':eval=frame[click${index}]`,
     `[video${index}][click${index}]overlay=x='${number(click.point.x * scale)}-w/2':y='${number(click.point.y * scale)}-h/2':${overlay}:enable='between(t,${start},${end})'[video${index + 1}]`,
   ]
 }
