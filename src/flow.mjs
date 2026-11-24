@@ -155,7 +155,7 @@ export function createFlowApi({ page, trace, clock, viewport, signal, narration 
     scroll: withHandles(async (handles, locator, { block = 'center' } = {}) => {
       if (!['start', 'center', 'end'].includes(block)) throw new TraceframeError('scroll() block must be start, center or end.', { code: 'INVALID_FLOW' })
       trace.targets.push({ at: secondsSince(clock) })
-      const { shown } = await reveal((await findTarget(locator, signal, handles)).element, locator, signal, handles, block)
+      const { shown } = await alignScrollTarget(locator, signal, handles, block)
       if (!shown) throw new TraceframeError(`${locator} could not be revealed by scrolling.`, { code: 'FLOW_TARGET_OUTSIDE_VIEWPORT' })
     }),
     mark(name) {
@@ -218,6 +218,8 @@ async function findTarget(locator, signal, handles, afterScroll = false) {
         throw fromTimeout(error, `${locator} kept moving after it was scrolled into view.`, 'FLOW_TARGET_MOVED')
       })
       const box = await element.boundingBox()
+      // A disappearing iframe can lose its box before Playwright reports the frame detached.
+      if (!box && attempt === 0) continue
       if (!box) throw new TraceframeError(`Could not find ${locator}.`, { code: 'FLOW_TARGET_MISSING' })
       return { element, box }
     } catch (error) {
@@ -243,19 +245,22 @@ async function aimPoint({ element, box }) {
   return { x: box.x + offset.x * box.width, y: box.y + offset.y * box.height }
 }
 
-async function reveal(element, locator, signal, handles, block) {
-  if (block === undefined) {
-    // Content loading above a pointer target can push its aim point out of view again.
-    const first = await scrollAndObserve(element, locator, signal, handles, 'center')
-    return first.visible ? first : scrollAndObserve(first.element, locator, signal, handles, 'center')
-  }
+async function reveal(element, locator, signal, handles) {
+  // Content loading above a pointer target can push its aim point out of view again.
+  const first = await scrollAndObserve(element, locator, signal, handles, 'center')
+  return first.visible ? first : scrollAndObserve(first.element, locator, signal, handles, 'center')
+}
 
+async function alignScrollTarget(locator, signal, handles, block) {
   let corrections = 0
   for (let attempt = 0; attempt < 2 && corrections < 3; attempt++) {
-    // A replacement can be in a new iframe, so resolve the whole locator again.
-    if (attempt) element = (await findScrolledTarget(locator, signal, handles)).element
-    const frame = await element.ownerFrame()
+    let element, frame
     try {
+      // A replacement can be in a new iframe, so resolve the whole locator again.
+      const found = attempt ? await findScrolledTarget(locator, signal, handles) : await findTarget(locator, signal, handles)
+      element = found.element
+      frame = await element.ownerFrame()
+      if (!frame) continue
       let target = await scrollIntoView(element, locator, signal, handles, block)
       while (corrections < 3) {
         const scrolled = target.element
@@ -267,7 +272,14 @@ async function reveal(element, locator, signal, handles, block) {
       }
     } catch (error) {
       signal?.throwIfAborted()
-      if (locator.page().isClosed() || (frame && !frame.isDetached())) throw error
+      if (locator.page().isClosed()) throw error
+      // The frame may detach before ownerFrame() resolves. If the old iframe stays mounted,
+      // evaluateAll can instead find the successor in a different JavaScript context.
+      const message = error?.message ?? ''
+      const detached = (element && !frame) || frame?.isDetached() || /^[\w.]+: Frame (?:was|has been) detached\b/i.test(message)
+      const changedContext = message.startsWith('locator.evaluateAll: JSHandles can be evaluated only in the context they were created') ||
+        message.startsWith('locator.evaluateAll: Unable to adopt element handle from a different document')
+      if (!detached && !changedContext) throw error
     }
   }
   signal?.throwIfAborted()
@@ -300,10 +312,13 @@ function watchAlignment(node, { block, observe }) {
     return { x: rect.x, y }
   }
   const containers = [{ el: node, start: position(node) }]
-  const parent = el => el.assignedSlot ?? el.parentElement ?? el.getRootNode().host
-  for (let el = parent(node); el; el = parent(el)) {
-    if (el === node.ownerDocument.scrollingElement) continue
+  // Chromium resolves a view timeline's source to its actual scrollport, including a panel
+  // around a slot in a closed shadow root where the subject's assignedSlot is null.
+  for (let subject = node; ;) {
+    const el = new ViewTimeline({ subject }).source
+    if (!el || el === subject || el === node.ownerDocument.scrollingElement) break
     containers.push({ el, start: position(el), style: getComputedStyle(el) })
+    subject = el
   }
   // A clipping wrapper can grow around an aligned target. Track its edge only on axes it can scroll.
   const allowsScroll = overflow => overflow !== 'visible' && overflow !== 'clip'
@@ -325,7 +340,7 @@ function watchAlignment(node, { block, observe }) {
     observer.observe(node)
   })
   // Element scroll events stay inside their shadow root, including panels around a slot.
-  const roots = new Set(containers.map(({ el }) => el.getRootNode()))
+  const roots = new Set([node.ownerDocument, ...containers.map(({ el }) => el.getRootNode())])
   for (const root of roots) root.addEventListener('scroll', check, true)
   return {
     ready,
@@ -345,14 +360,15 @@ function watchAlignment(node, { block, observe }) {
       const entry = observer?.takeRecords().at(-1)
       observer?.disconnect()
       check()
-      return { moved, shown: entry ? entry.intersectionRatio > 0 : shown }
+      if (entry) shown = entry.intersectionRatio > 0
+      return { moved, shown: observe ? shown : node.checkVisibility({ visibilityProperty: true }) }
     },
   }
 }
 
 async function checkAlignment(locator, scrolled, { element, frameElements }, block, signal, handles) {
   const watchers = []
-  let moved = false, shown, target
+  let moved = false, shown = true, target
   try {
     for (const handle of [...frameElements, element]) {
       const watcher = await handle.evaluateHandle(watchAlignment, { block, observe: handle === element })
@@ -370,14 +386,15 @@ async function checkAlignment(locator, scrolled, { element, frameElements }, blo
     if (!corrected) return null
   } finally {
     for (const watcher of watchers) {
-      const result = await watcher.evaluate(watcher => watcher.finish()).catch(() => ({ moved: true }))
+      const result = await watcher.evaluate(watcher => watcher.finish()).catch(() => ({ moved: true, shown: false }))
       moved ||= result.moved
-      if (result.shown !== undefined) shown = result.shown
+      shown &&= result.shown
     }
   }
-  const current = await locator.evaluateAll((matches, [watcher, scrolled]) => watcher.matches(matches, scrolled), [target, scrolled])
+  const visible = await locator.evaluateAll((matches, [watcher, scrolled]) =>
+    watcher.matches(matches, scrolled) ? scrolled.checkVisibility({ visibilityProperty: true }) : null, [target, scrolled])
   signal?.throwIfAborted()
-  return current ? { shown, moved } : null
+  return visible === null ? null : { shown: shown && visible, moved }
 }
 
 // Awaiting the scroll waits for a scrolling panel. Chromium resolves a page scroll before it stops, and a sticky target
