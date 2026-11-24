@@ -294,17 +294,21 @@ async function scrollAndObserve(element, locator, signal, handles, block) {
 // Track the target (or its containing iframe) against each local scrollport. A panel and the page
 // can scroll in opposite directions, and scrollend can move an iframe back to its starting position.
 function watchAlignment(node, { block, observe }) {
-  const containers = [node]
+  const containers = [{ el: node }]
   const parent = el => el.assignedSlot ?? el.parentElement ?? el.getRootNode().host
   for (let el = parent(node); el; el = parent(el)) {
-    const style = getComputedStyle(el)
     if (el === node.ownerDocument.scrollingElement) continue
-    if (style.overflowX !== 'visible' || style.overflowY !== 'visible') containers.push(el)
+    containers.push({ el, style: getComputedStyle(el) })
   }
-  const positions = () => containers.map(el => {
+  // A clipping wrapper can grow around an aligned target. Track its edge only on axes it can scroll.
+  const allowsScroll = overflow => overflow !== 'visible' && overflow !== 'clip'
+  const positions = () => containers.map(({ el, style }) => {
+    const trackX = !style || (allowsScroll(style.overflowX) && el.scrollWidth > el.clientWidth)
+    const trackY = !style || (allowsScroll(style.overflowY) && el.scrollHeight > el.clientHeight)
+    if (!trackX && !trackY) return ''
     const rect = el.getBoundingClientRect()
     const y = block === 'start' ? rect.top : block === 'end' ? rect.bottom : rect.top + rect.height / 2
-    return `${rect.x},${y}`
+    return `${trackX ? rect.x : ''},${trackY ? y : ''}`
   }).join('/')
   const start = positions()
   let moved = false, shown, observer

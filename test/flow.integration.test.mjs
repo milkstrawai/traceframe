@@ -683,6 +683,33 @@ test('keeps the start of a growing result aligned during the correction', { time
   })
 })
 
+test('keeps a heading aligned while a wrapper grows along a non-scrolling axis', { timeout: 30_000 }, async () => {
+  for (const [overflow, block] of [['clip', 'center'], ['hidden', 'end'], ['auto', 'center']]) {
+    await withPage(`
+      <!doctype html><style>* { margin:0; overflow-anchor:none } aside, footer { height:1000px }
+      main { overflow:${overflow} } h2 { height:40px } article { height:80px; width:1200px }</style>
+      <aside></aside><main><h2>Result</h2><article></article></main><footer></footer>
+    `, async ({ page, api }) => {
+      const heading = page.locator('h2')
+      await heading.evaluate(node => {
+        const scroll = node.scrollIntoView
+        node.scrollIntoView = function (options) {
+          if (options.behavior === 'instant') {
+            const sibling = node.nextElementSibling
+            sibling.style.height = `${sibling.offsetHeight + 20}px`
+          }
+          return scroll.call(this, options)
+        }
+      })
+      await api.scroll(heading, { block })
+      assert.ok((await page.locator('article').boundingBox()).height > 80)
+      const box = await heading.boundingBox()
+      assert.equal(box.y, block === 'center' ? 280 : 560)
+      assert.equal(await page.evaluate(y => document.elementFromPoint(10, y)?.tagName, box.y + 20), 'H2')
+    })
+  }
+})
+
 test('aligns the end of a sticky section inside a sticky scrolling panel', async () => {
   await withPage(`
     <!doctype html><style>* { margin:0; overflow-anchor:none } aside, article { height:400px }
