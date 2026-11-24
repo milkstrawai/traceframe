@@ -250,22 +250,27 @@ async function reveal(element, locator, signal, handles, block) {
     return first.visible ? first : scrollAndObserve(first.element, locator, signal, handles, 'center')
   }
 
-  let target = await scrollIntoView(element, locator, signal, handles, block)
-  let replaced = false
-  for (let attempt = 1; ; attempt++) {
-    const result = await scrollAndObserve(target.element, locator, signal, handles, block)
-    const alignment = await correctAlignment(locator, target.element, result, block, signal)
-    if (alignment === 'aligned') return result
-    signal?.throwIfAborted()
-    if (attempt === 3 || (alignment === 'replaced' && replaced)) break
-    if (alignment === 'replaced') {
-      replaced = true
-      const next = await findScrolledTarget(locator, signal, handles)
-      target = await scrollIntoView(next.element, locator, signal, handles, block)
-    } else {
-      target = result
+  let corrections = 0
+  for (let attempt = 0; attempt < 2 && corrections < 3; attempt++) {
+    // A replacement can be in a new iframe, so resolve the whole locator again.
+    if (attempt) element = (await findScrolledTarget(locator, signal, handles)).element
+    const frame = await element.ownerFrame()
+    try {
+      let target = await scrollIntoView(element, locator, signal, handles, block)
+      while (corrections < 3) {
+        const scrolled = target.element
+        target = await scrollIntoView(scrolled, locator, signal, handles, block)
+        const result = await checkAlignment(locator, scrolled, target, block, signal, handles)
+        if (!result) break
+        if (!result.moved) return result
+        corrections++
+      }
+    } catch (error) {
+      signal?.throwIfAborted()
+      if (locator.page().isClosed() || (frame && !frame.isDetached())) throw error
     }
   }
+  signal?.throwIfAborted()
   throw new TraceframeError(`${locator} kept changing while it was scrolled into view.`, { code: 'FLOW_TARGET_MOVED' })
 }
 
@@ -286,26 +291,84 @@ async function scrollAndObserve(element, locator, signal, handles, block) {
   return { ...target, point, ...visibility }
 }
 
-// After the smooth scroll settles, ask Chromium to apply the alignment against the current margins and scrollports.
-// A late correction can fire scrollend and change the layout again, so check visibility again if the target moved.
-async function correctAlignment(locator, scrolled, { element, frameElements }, block, signal) {
-  const framePositions = () => Promise.all(frameElements.map(handle => handle.evaluate(node => {
-    const { x, y } = node.getBoundingClientRect()
-    return `${x},${y}`
-  })))
-  const before = await framePositions()
+// Track the target (or its containing iframe) against each local scrollport. A panel and the page
+// can scroll in opposite directions, and scrollend can move an iframe back to its starting position.
+function watchAlignment(node, { block, observe }) {
+  const containers = [node]
+  const parent = el => el.assignedSlot ?? el.parentElement ?? el.getRootNode().host
+  for (let el = parent(node); el; el = parent(el)) {
+    const style = getComputedStyle(el)
+    if (el === node.ownerDocument.scrollingElement) continue
+    if (style.overflowX !== 'visible' || style.overflowY !== 'visible') containers.push(el)
+  }
+  const positions = () => containers.map(el => {
+    const rect = el.getBoundingClientRect()
+    const y = block === 'start' ? rect.top : block === 'end' ? rect.bottom : rect.top + rect.height / 2
+    return `${rect.x},${y}`
+  }).join('/')
+  const start = positions()
+  let moved = false, shown, observer
+  const check = () => { moved ||= positions() !== start }
+  // Keep the observer live through the correction so its result includes any change in clipping.
+  const ready = observe && new Promise(resolve => {
+    observer = new IntersectionObserver(entries => {
+      shown = entries.at(-1).intersectionRatio > 0
+      resolve()
+    }, { threshold: [0, Number.EPSILON] })
+    observer.observe(node)
+  })
+  node.ownerDocument.addEventListener('scroll', check, true)
+  return {
+    ready,
+    matches(elements, scrolled) {
+      return elements.length === 1 && elements[0] === node && node === scrolled && node.isConnected
+    },
+    async correct() {
+      check()
+      const scrolling = node.scrollIntoView({ behavior: 'instant', block })
+      check()
+      await scrolling
+      // The browser dispatches scroll events before rAF and updates intersections after rAF.
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    },
+    finish() {
+      node.ownerDocument.removeEventListener('scroll', check, true)
+      const entry = observer?.takeRecords().at(-1)
+      observer?.disconnect()
+      check()
+      return { moved, shown: entry ? entry.intersectionRatio > 0 : shown }
+    },
+  }
+}
+
+async function checkAlignment(locator, scrolled, { element, frameElements }, block, signal, handles) {
+  const watchers = []
+  let moved = false, shown, target
+  try {
+    for (const handle of [...frameElements, element]) {
+      const watcher = await handle.evaluateHandle(watchAlignment, { block, observe: handle === element })
+      handles.push(watcher)
+      watchers.push(watcher)
+    }
+    target = watchers.at(-1)
+    await target.evaluate(watcher => watcher.ready)
+    signal?.throwIfAborted()
+    const corrected = await locator.evaluateAll(async (matches, [watcher, scrolled]) => {
+      if (!watcher.matches(matches, scrolled)) return false
+      await watcher.correct()
+      return true
+    }, [target, scrolled])
+    if (!corrected) return null
+  } finally {
+    for (const watcher of watchers) {
+      const result = await watcher.evaluate(watcher => watcher.finish()).catch(() => ({ moved: true }))
+      moved ||= result.moved
+      if (result.shown !== undefined) shown = result.shown
+    }
+  }
+  const current = await locator.evaluateAll((matches, [watcher, scrolled]) => watcher.matches(matches, scrolled), [target, scrolled])
   signal?.throwIfAborted()
-  const state = await locator.evaluateAll(async (matches, [scrolled, node, block]) => {
-    if (matches.length !== 1 || matches[0] !== node || node !== scrolled || !node.isConnected) return 'replaced'
-    const start = node.getBoundingClientRect()
-    const scrolling = node.scrollIntoView({ behavior: 'instant', block })
-    const end = node.getBoundingClientRect()
-    await scrolling
-    return start.x === end.x && start.y === end.y ? 'aligned' : 'moved'
-  }, [scrolled, element, block])
-  if (state !== 'aligned') return state
-  const after = await framePositions()
-  return before.some((position, i) => position !== after[i]) ? 'moved' : 'aligned'
+  return current ? { shown, moved } : null
 }
 
 // Awaiting the scroll waits for a scrolling panel. Chromium resolves a page scroll before it stops, and a sticky target

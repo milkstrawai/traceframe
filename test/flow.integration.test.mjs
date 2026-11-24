@@ -508,6 +508,87 @@ test('aligns a target inside an iframe after two parent layout shifts at scrolle
   }
 })
 
+test('stops when scrollend keeps shifting an aligned iframe back', { timeout: 30_000 }, async () => {
+  for (const block of ['start', 'end']) {
+    await withPage(`
+      <!doctype html><style>* { margin:0; overflow-anchor:none } aside, footer { height:1400px }
+      iframe { display:block; width:500px; height:220px; border:0 }</style>
+      <aside></aside><iframe srcdoc="<style>* { margin:0 } section { height:800px }</style><section>Result</section>"></iframe><footer></footer>
+    `, async ({ page, api }) => {
+      await page.evaluate(block => document.addEventListener('scrollend', () => {
+        const aside = document.querySelector('aside')
+        aside.style.height = `${aside.offsetHeight + (block === 'start' ? 100 : -100)}px`
+      }), block)
+      await assert.rejects(api.scroll(page.frameLocator('iframe').locator('section'), { block }), { code: 'FLOW_TARGET_MOVED' })
+    })
+  }
+})
+
+for (const change of ['resize', 'replace', 'margin']) {
+  test(`settles opposite panel and page scrolls after a late ${change}`, { timeout: 30_000 }, async () => {
+    await withPage(`
+      <!doctype html><style>* { margin:0; overflow-anchor:none } aside, footer { height:1000px }
+      main { height:200px; overflow:auto } section { height:70px }</style>
+      <aside></aside><main><aside></aside><section>Result</section><footer></footer></main><footer></footer>
+    `, async ({ page, api }) => {
+      await page.evaluate(change => {
+        const panel = document.querySelector('main')
+        const spacer = panel.querySelector('aside')
+        let events = 0
+        panel.addEventListener('scrollend', () => {
+          events++
+          if (events === 1) spacer.style.height = '1100px'
+          if (events === 2) panel.style.height = change === 'resize' ? '100px' : '300px'
+          if (change === 'margin' && events === 3) panel.querySelector('section').style.scrollMarginBottom = '37px'
+          if (change === 'replace' && events === 3) {
+            const replacement = document.createElement('section')
+            replacement.textContent = 'Complete'
+            panel.querySelector('section').replaceWith(replacement)
+            spacer.style.height = '1187px'
+          }
+        })
+      }, change)
+      const target = page.locator('section')
+      await api.scroll(target, { block: 'end' })
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+      assert.equal(await target.textContent(), change === 'replace' ? 'Complete' : 'Result')
+      const panel = await page.locator('main').boundingBox()
+      assert.equal(panel.height, change === 'resize' ? 100 : 300)
+      const box = await target.boundingBox()
+      assert.equal(box.y + box.height, panel.y + panel.height - (change === 'margin' ? 37 : 0))
+      assert.equal(await page.evaluate(y => document.elementFromPoint(10, y)?.tagName, box.y + box.height / 2), 'SECTION')
+    })
+  })
+}
+
+for (const behavior of ['smooth', 'instant']) {
+  test(`reacquires an iframe replaced during the ${behavior} scroll`, { timeout: 30_000 }, async () => {
+    await withPage(`
+      <!doctype html><style>* { margin:0; overflow-anchor:none } aside, footer { height:1000px }
+      iframe { display:block; width:500px; height:220px; border:0 }</style>
+      <aside></aside><iframe srcdoc="<style>* { margin:0 } section { height:100px; margin:400px 0 }</style><section>Original</section>"></iframe><footer></footer>
+    `, async ({ page, api }) => {
+      const target = page.frameLocator('iframe').locator('section')
+      await target.evaluate((node, behavior) => {
+        const scroll = node.scrollIntoView
+        node.scrollIntoView = function (options) {
+          const result = scroll.call(this, options)
+          if (options.behavior === behavior) {
+            const iframe = window.frameElement
+            const replacement = iframe.cloneNode()
+            replacement.srcdoc = iframe.srcdoc.replace('Original', 'Complete')
+            iframe.replaceWith(replacement)
+          }
+          return result
+        }
+      }, behavior)
+      await api.scroll(target, { block: 'start' })
+      assert.equal(await target.textContent(), 'Complete')
+      assert.ok(Math.abs((await target.boundingBox()).y) <= 1)
+    })
+  })
+}
+
 test('corrects a late layout shift on the replacement and stops if the page keeps shifting', async () => {
   await withPage(`
     <!doctype html><style>* { margin:0; overflow-anchor:none } aside, footer { height:1000px }
@@ -575,6 +656,31 @@ test('uses the current scroll margin and panel size when the result changes duri
       }
     })
   }
+})
+
+test('keeps the start of a growing result aligned during the correction', { timeout: 30_000 }, async () => {
+  await withPage(`
+    <!doctype html><style>* { margin:0; overflow-anchor:none } aside, footer { height:1000px }
+    section { height:300px; scroll-margin-top:24px }</style>
+    <aside></aside><section>Streaming</section><footer></footer>
+  `, async ({ page, api }) => {
+    const target = page.locator('section')
+    await target.evaluate(node => {
+      const scroll = node.scrollIntoView
+      node.scrollIntoView = function (options) {
+        if (options.behavior === 'instant') {
+          const grow = () => { node.style.height = `${node.offsetHeight + 10}px` }
+          grow()
+          requestAnimationFrame(grow)
+        }
+        return scroll.call(this, options)
+      }
+    })
+    await api.scroll(target, { block: 'start' })
+    const box = await target.boundingBox()
+    assert.ok(box.height >= 320)
+    assert.equal(box.y, 24)
+  })
 })
 
 test('aligns the end of a sticky section inside a sticky scrolling panel', async () => {
