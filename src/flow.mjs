@@ -321,7 +321,9 @@ function watchAlignment(node, { block, observe }) {
     }, { threshold: [0, Number.EPSILON] })
     observer.observe(node)
   })
-  node.ownerDocument.addEventListener('scroll', check, true)
+  // Element scroll events stay inside their shadow root, including panels around a slot.
+  const roots = new Set(containers.map(({ el }) => el.getRootNode()))
+  for (const root of roots) root.addEventListener('scroll', check, true)
   return {
     ready,
     matches(elements, scrolled) {
@@ -336,7 +338,7 @@ function watchAlignment(node, { block, observe }) {
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
     },
     finish() {
-      node.ownerDocument.removeEventListener('scroll', check, true)
+      for (const root of roots) root.removeEventListener('scroll', check, true)
       const entry = observer?.takeRecords().at(-1)
       observer?.disconnect()
       check()

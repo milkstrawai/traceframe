@@ -524,6 +524,31 @@ test('stops when scrollend keeps shifting an aligned iframe back', { timeout: 30
   }
 })
 
+test('realigns a slotted iframe when its shadow panel shifts it at scrollend', { timeout: 30_000 }, async () => {
+  for (const block of ['start', 'end']) {
+    await withPage(`
+      <!doctype html><style>* { margin:0; overflow-anchor:none } iframe { display:block; width:500px; height:220px; border:0 }</style>
+      <div><template shadowrootmode="open">
+        <style>main { height:600px; overflow:auto; overflow-anchor:none } aside, footer { height:1400px }</style>
+        <main><aside></aside><slot></slot><footer></footer></main>
+      </template><iframe srcdoc="<style>* { margin:0 } section { height:800px }</style><section>Result</section>"></iframe></div>
+    `, async ({ page, api }) => {
+      const spacer = page.locator('aside')
+      await spacer.evaluate((aside, block) => {
+        let shifts = 0
+        aside.parentElement.addEventListener('scrollend', () => {
+          if (++shifts <= 3) aside.style.height = `${aside.offsetHeight + (block === 'start' ? 100 : -100)}px`
+        })
+      }, block)
+      const target = page.frameLocator('iframe').locator('section')
+      await api.scroll(target, { block })
+      assert.equal((await spacer.boundingBox()).height, block === 'start' ? 1700 : 1100)
+      const box = await target.boundingBox()
+      assert.ok(Math.abs(block === 'start' ? box.y : box.y + box.height - 600) <= 1, block)
+    })
+  }
+})
+
 for (const change of ['resize', 'replace', 'margin']) {
   test(`settles opposite panel and page scrolls after a late ${change}`, { timeout: 30_000 }, async () => {
     await withPage(`
