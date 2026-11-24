@@ -813,6 +813,33 @@ test('keeps the start of a growing result aligned during the correction', { time
   })
 })
 
+test('aligns a stable heading while its result gains a row every animation frame', { timeout: 30_000 }, async () => {
+  await withPage(`
+    <!doctype html><style>* { margin:0; overflow-anchor:none } section { margin:1000px 0 }
+    h2 { scroll-margin-top:24px } p { height:16px }</style>
+    <section><h2>Results</h2></section>
+  `, async ({ page, api }) => {
+    const result = page.locator('section')
+    const heading = result.getByRole('heading', { name: 'Results' })
+    const rows = result.locator('p')
+    await result.evaluate(section => {
+      function addRow() {
+        section.append(document.createElement('p'))
+        requestAnimationFrame(addRow)
+      }
+      addRow()
+    })
+
+    const before = await rows.count()
+    await api.scroll(heading, { block: 'start' })
+    const after = await rows.count()
+    assert.ok(after > before, 'rows arrived during scroll()')
+    assert.equal((await heading.boundingBox()).y, 24)
+    await page.evaluate(() => new Promise(requestAnimationFrame))
+    assert.ok(await rows.count() > after, 'rows kept arriving after alignment')
+  })
+})
+
 test('keeps a heading aligned while a wrapper grows along a non-scrolling axis', { timeout: 30_000 }, async () => {
   for (const [overflow, block] of [['clip', 'center'], ['hidden', 'end'], ['auto', 'center']]) {
     await withPage(`
