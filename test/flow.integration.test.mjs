@@ -619,6 +619,32 @@ for (const behavior of ['smooth', 'instant']) {
   })
 }
 
+test('realigns a reloaded iframe document and bounds repeated reloads', { timeout: 20_000 }, async () => {
+  for (const repeat of [false, true]) {
+    await withPage('<style>* { margin:0 } iframe { display:block; border:0; margin:1000px 0 }</style><iframe></iframe>', async ({ page, api }) => {
+      const iframe = page.locator('iframe')
+      await iframe.evaluate((el, repeat) => {
+        window.reloads = 0
+        window.reloadTarget = () => {
+          window.reloads++
+          el.srcdoc = el.srcdoc.replace('Original', 'Complete')
+        }
+        el.srcdoc = `<style>* { margin:0 } section { height:80px; margin:1000px 0 }</style><section>Original</section>
+          <script>if (!parent.reloads || ${repeat}) document.addEventListener('scrollend', parent.reloadTarget, { once:true })</script>`
+      }, repeat)
+      const target = page.frameLocator('iframe').locator('section')
+      if (repeat) {
+        await assert.rejects(api.scroll(target, { block: 'start' }), { code: 'FLOW_TARGET_MOVED' })
+        assert.equal(await page.evaluate(() => window.reloads), 2)
+      } else {
+        await api.scroll(target, { block: 'start' })
+        assert.equal(await target.textContent(), 'Complete')
+        assert.ok(Math.abs((await target.boundingBox()).y) <= 1)
+      }
+    })
+  }
+})
+
 for (const method of ['boundingBox', 'ownerFrame']) {
   test(`reacquires the target if its iframe detaches during ${method}()`, { timeout: 30_000 }, async () => {
     await withPage('<iframe style="margin:900px 0" srcdoc="<section>Original</section>"></iframe>', async ({ page, api }) => {

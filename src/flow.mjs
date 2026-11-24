@@ -273,13 +273,13 @@ async function alignScrollTarget(locator, signal, handles, block) {
     } catch (error) {
       signal?.throwIfAborted()
       if (locator.page().isClosed()) throw error
-      // The frame may detach before ownerFrame() resolves. If the old iframe stays mounted,
-      // evaluateAll can instead find the successor in a different JavaScript context.
+      // An iframe can detach before ownerFrame() resolves, retain its Frame across a reload,
+      // or stay mounted while the locator moves to a different document.
       const message = error?.message ?? ''
       const detached = (element && !frame) || frame?.isDetached() || /^[\w.]+: Frame (?:was|has been) detached\b/i.test(message)
-      const changedContext = message.startsWith('locator.evaluateAll: JSHandles can be evaluated only in the context they were created') ||
-        message.startsWith('locator.evaluateAll: Unable to adopt element handle from a different document')
-      if (!detached && !changedContext) throw error
+      const reloaded = /^[\w.]+: (?:Execution context was destroyed|Protocol error \(DOM\.describeNode\): Cannot find context with specified id)/.test(message)
+      const staleHandle = /^[\w.]+: (?:JSHandles can be evaluated only in the context they were created|Unable to adopt element handle from a different document)/.test(message)
+      if (!detached && !reloaded && !staleHandle) throw error
     }
   }
   signal?.throwIfAborted()
@@ -332,28 +332,25 @@ function watchAlignment(node, { block, observe }) {
     })
   }
   // Keep the observer live through the correction so its result includes any change in clipping.
-  const ready = observe && new Promise(resolve => {
+  if (observe) {
     observer = new IntersectionObserver(entries => {
       shown = entries.at(-1).intersectionRatio > 0
-      resolve()
     }, { threshold: [0, Number.EPSILON] })
     observer.observe(node)
-  })
+  }
   // Element scroll events stay inside their shadow root, including panels around a slot.
   const roots = new Set([node.ownerDocument, ...containers.map(({ el }) => el.getRootNode())])
   for (const root of roots) root.addEventListener('scroll', check, true)
   return {
-    ready,
+    samples: 0,
+    get observed() { return shown !== undefined },
     matches(elements, scrolled) {
       return elements.length === 1 && elements[0] === node && node === scrolled && node.isConnected
     },
-    async correct() {
+    correct() {
       check()
-      const scrolling = node.scrollIntoView({ behavior: 'instant', block })
+      this.scrolling = node.scrollIntoView({ behavior: 'instant', block })
       check()
-      await scrolling
-      // The browser dispatches scroll events before rAF and updates intersections after rAF.
-      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
     },
     finish() {
       for (const root of roots) root.removeEventListener('scroll', check, true)
@@ -370,20 +367,27 @@ async function checkAlignment(locator, scrolled, { element, frameElements }, blo
   const watchers = []
   let moved = false, shown = true, target
   try {
+    const frame = await element.ownerFrame()
+    if (!frame) return null
     for (const handle of [...frameElements, element]) {
       const watcher = await handle.evaluateHandle(watchAlignment, { block, observe: handle === element })
       handles.push(watcher)
       watchers.push(watcher)
     }
     target = watchers.at(-1)
-    await target.evaluate(watcher => watcher.ready)
+    await waitInFrame(frame, watcher => watcher.observed, target, signal)
     signal?.throwIfAborted()
-    const corrected = await locator.evaluateAll(async (matches, [watcher, scrolled]) => {
+    const corrected = await locator.evaluateAll((matches, [watcher, scrolled]) => {
       if (!watcher.matches(matches, scrolled)) return false
-      await watcher.correct()
+      watcher.correct()
       return true
     }, [target, scrolled])
     if (!corrected) return null
+    await waitInFrame(frame, watcher => watcher.scrolling ?? true, target, signal)
+    // Scroll events run before paint and intersections update afterward. The first poll is immediate.
+    await waitInFrame(frame, watcher => ++watcher.samples >= 3, target, signal)
+  } catch (error) {
+    throw fromTimeout(error, `${locator} did not finish its scroll alignment.`, 'FLOW_TARGET_MOVED')
   } finally {
     for (const watcher of watchers) {
       const result = await watcher.evaluate(watcher => watcher.finish()).catch(() => ({ moved: true, shown: false }))
@@ -397,25 +401,35 @@ async function checkAlignment(locator, scrolled, { element, frameElements }, blo
   return visible === null ? null : { shown: shown && visible, moved }
 }
 
+// Playwright owns the polling deadline and cancellation even if Chromium stops painting a hidden iframe.
+async function waitInFrame(frame, condition, arg, signal) {
+  const result = await frame.waitForFunction(condition, arg, { signal })
+  await result.dispose()
+}
+
 // Awaiting the scroll waits for a scrolling panel. Chromium resolves a page scroll before it stops, and a sticky target
 // or iframe can stay put while its page scrolls, so also wait for every enclosing page to stop.
 async function scrollIntoView(element, locator, signal, handles, block) {
   signal?.throwIfAborted()
-  await element.evaluate((target, block) => target.scrollIntoView({ behavior: 'smooth', block }), block)
   try {
     const frameElements = []
     let frame = await element.ownerFrame()
+    if (!frame) throw new TraceframeError(`Could not find the frame for ${locator}.`, { code: 'FLOW_TARGET_MISSING' })
+    // An object handle stays in this document if the iframe navigates while the native scroll is pending.
+    signal?.throwIfAborted()
+    const pending = await element.evaluateHandle((node, block) => ({
+      scrolling: node.scrollIntoView({ behavior: 'smooth', block }),
+      samples: 0,
+    }), block)
+    handles.push(pending)
+    await waitInFrame(frame, state => state.scrolling ?? true, pending, signal)
     while (frame) {
-      await frame.evaluate(() => new Promise((resolve) => {
-        let last
-        const check = () => {
-          const now = `${scrollX},${scrollY}`
-          if (now === last) resolve()
-          else requestAnimationFrame(check)
-          last = now
-        }
-        requestAnimationFrame(check)
-      }))
+      await waitInFrame(frame, state => {
+        const position = `${scrollX},${scrollY}`
+        const stopped = ++state.samples >= 3 && position === state.last
+        state.last = position
+        return stopped
+      }, frameElements.length ? { samples: 0 } : pending, signal)
       if (!frame.parentFrame()) break
       const frameElement = await frame.frameElement()
       handles.push(frameElement)
