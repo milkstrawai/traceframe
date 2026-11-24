@@ -1,6 +1,6 @@
 {
   "name": "traceframe",
-  "version": "0.8.2",
+  "version": "0.9.0",
   "description": "Record scripted browser flows and render smooth cursor overlays into video.",
   "keywords": [
     "playwright",

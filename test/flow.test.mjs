@@ -40,6 +40,25 @@ function target(page, { start = box, arrived = start, beforeClick = arrived, pre
   }
 }
 
+test('marks use the first-frame clock, retain repeated names and reject empty names', () => {
+  const trace = createTrace({ x: 0, y: 0 })
+  const clock = Date.now() + 1000
+  const { mark } = createFlowApi({ trace, clock })
+  mark('chapter')
+  mark('chapter')
+  assert.deepEqual(trace.marks, [{ name: 'chapter', at: 0 }, { name: 'chapter', at: 0 }])
+  for (const name of ['', ' ', 1]) assert.throws(() => mark(name), { code: 'INVALID_FLOW' })
+})
+
+test('a cancellation listener can mark safely while the flow is unwinding', () => {
+  const controller = new AbortController()
+  const trace = createTrace({ x: 0, y: 0 })
+  const { mark } = createFlowApi({ trace, clock: Date.now(), signal: controller.signal })
+  controller.signal.addEventListener('abort', () => mark('cancelled'))
+  controller.abort()
+  assert.deepEqual(trace.marks, [])
+})
+
 test('eases the pointer to the target center and sends the end point once', async () => {
   const { api, page } = setup()
   await api.hover(target(page), { duration: 0.2 })

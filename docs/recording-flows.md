@@ -73,7 +73,9 @@ For a target clipped by a scrollable panel or covered by a sticky header, try `a
 
 Both automatic scrolling and `scroll(target)` can move the outer page, which closes some lists. For those lists, use their own scrolling container through Playwright, for example `await list.evaluate((element) => element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' }))` to show the final options, then click the option. Wait for any opening animation before scrolling.
 
-To show a result without a pointer action, use `await scroll(result)`. Centering a result taller than the view hides its start, so scroll to its heading or another element near its start instead.
+To show a result without a pointer action, use `await scroll(result)`. For a result taller than the view, use `await scroll(result, { block: 'start' })` to show its heading or `{ block: 'end' }` to show its final rows.
+
+While rows are arriving, scroll a heading whose size and position stay stable, for example `await scroll(resultHeading, { block: 'start' })`. To align the whole result, wait until its size settles.
 
 Focus a field visibly, then type with a delay in milliseconds:
 
@@ -103,7 +105,7 @@ Set a Playwright timeout explicitly when an individual operation may exceed its 
 
 ## Add captions and reading time
 
-For a narrated video, use [`say()`](../README.md#add-a-voice-over) instead of the caption recipe below: the speech sets the reading time, and Traceframe draws the captions. Write each line as you would say it, in one or two short sentences, and run its actions in `during`. Listen to the first take, and respell any name the voice says wrongly.
+For a narrated video, use [`say()`](../README.md#add-a-voice-over) instead of the caption recipe below: the speech sets the reading time, and Traceframe draws the captions. Write each line as you would say it, in one or two short sentences, and run its actions in `during`. If the voice mispronounces a name, respell it in the spoken line and pass `captionText` with the correct spelling.
 
 For a review video, explain what the viewer should notice. Show the caption, pause before moving the pointer, perform the action, then hold the result. Start with about 12 characters per second and a 2.5-second minimum for reading, followed by a 2.5–4 second result hold.
 
@@ -209,7 +211,7 @@ For video assets you control, matching the source dimensions to the displayed ph
 If the video looks choppy:
 
 1. Apply any preparation above that suits the demonstration and make one more take at the same recording settings.
-2. For a browser Traceframe launches, check `graphics.hardwareAccelerated` in the result. If it is `false`, or `graphics.renderer` names a slower GPU than the machine has, see [GPU rendering](../README.md#gpu-rendering) for fixes; most change system settings, so ask the machine's owner first. After a failed GPU attempt, `graphics.fallbackReason` gives the reason: on Linux, for example, `gpu-device-unavailable` means no GPU device exists or the account cannot open one.
+2. Check `graphics.hardwareAccelerated` in the result. For a caller-owned page, launch Chromium with `args: chromiumGpuArgs()` from `traceframe`. If it is `false`, or `graphics.renderer` names a slower GPU than the machine has, see [GPU rendering](../README.md#gpu-rendering) for fixes; most change system settings, so ask the machine's owner first. A managed Linux browser can report `gpu-device-unavailable` when its account cannot open a GPU device. For a caller-owned page, `software-rendering` describes what Chromium reported.
 3. If the video is still choppy, or nothing applies, keep the requested output dimensions, playback speed and source quality, finish the requested recording and report the limitation. Mention that a smaller scale usually helps most on a slower machine: `--scale 1` (`scale: 1` in the API) leaves Chromium a quarter of the pixels to capture, while a lower FPS does not reduce capture work.
 
 For optional diagnosis of playback without recording, let buffering and any extension processing warm up, then read the video's `getVideoPlaybackQuality()` counters before and after a representative segment with recording off, for example in `ready` or before `recordPage`. Page preparation can improve playback while capture remains expensive.
@@ -286,18 +288,16 @@ Inspect the rendered result with audio enabled, and compare another marker near 
 
 Edit the finished MP4 with FFmpeg rather than changing the flow. Editing finished frames keeps the page and cursor together. Keep the original, and say when a clip's pacing was edited.
 
-To speed up an idle stretch, such as a progress bar, you need its start and end times. Read them in a video player, or log them from the flow; logged times run up to about 0.1 seconds earlier than in the video:
+To speed up an idle stretch, mark its start and end in the flow. The recording summary's `marks` array gives both positions in seconds from the first frame. For narrated sections, `lines` gives the start and end of each spoken line on the same clock.
 
 ```js
-export default async function ({ page, click, wait }) {
-  const started = Date.now()
-  const mark = (label) => console.error(`${label}: ${((Date.now() - started) / 1000).toFixed(2)} s`)
-  // ...
-  mark('progress started')
+export default async function ({ page, click, mark, signal }) {
+  await click(page.getByRole('button', { name: 'Export' }))
+  mark('export started')
+  await page.getByText('Export complete').waitFor({ signal })
+  mark('export finished')
 }
 ```
-
-Log to `console.error`, because Traceframe prints its JSON summary on standard output.
 
 This command plays seconds 2 to 9 at 4× speed. Set `fps` to the video's frame rate: 60 for the default preset, 30 for draft. It drops the audio track; to keep audio synchronized, apply the same cuts and speed changes to its timeline, including when speeding up silent intervals.
 

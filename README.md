@@ -8,7 +8,7 @@ https://github.com/user-attachments/assets/38e02cd5-a9ba-4f3c-938c-159955353141
 
 ## Prerequisites
 
-Traceframe requires Node.js 22+ and system FFmpeg 5+ with `libx264` and `ffprobe` to render the MP4 (for example, `brew install ffmpeg` or `sudo apt install ffmpeg`). Install Chromium with the exact Playwright version Traceframe uses; other cached versions are not used:
+Traceframe requires Node.js 22+ and system FFmpeg 5+ with `ffprobe`, `libx264`, the `lavfi` input device and the `movie` filter. For example, install FFmpeg with `brew install ffmpeg` or `sudo apt install ffmpeg`. Install Chromium with the exact Playwright version Traceframe uses; other cached versions are not used:
 
 ```sh
 npx playwright@1.64.1 install --only-shell chromium
@@ -86,14 +86,15 @@ The optional `ready({ page, signal })` hook runs after initial navigation and be
 
 ### Helpers
 
-The default function receives a Playwright `page`, an `AbortSignal` named `signal`, and six helpers:
+The default function receives a Playwright `page`, an `AbortSignal` named `signal`, and these helpers:
 
 | Helper | Use |
 | --- | --- |
 | `move({ x, y }, { duration })` | Move the pointer to viewport coordinates. |
 | `hover(locator, { duration })` | Move the pointer to a locator. |
 | `click(locator, { duration, dwell })` | Move, pause, and click a locator. |
-| `scroll(locator)` | Center a target without moving the pointer. |
+| `scroll(locator, { block })` | Scroll a target into view without moving the pointer. |
+| `mark(name)` | Save a named timestamp in the recording summary. |
 | `wait(seconds)` | Pause for reading time. |
 | `say(text, options)` | Speak a line and caption it; see [voice-over](#add-a-voice-over). |
 
@@ -105,11 +106,15 @@ Error messages name the locator; give it a clearer name with Playwright's `locat
 
 `click` and `hover` scroll automatically only when their aim point starts outside the viewport. They scroll smoothly through the page, scrollable containers, and iframes, and wait for scrolling to stop before moving the pointer.
 
-`scroll(target)` smoothly centers the target vertically, even if it is already visible, and waits for scrolling to stop without moving the pointer. Use it to show a result or before clicking a target clipped by a scrollable panel or covered by a sticky header. Wait for a dialog or toast to close instead.
+`scroll(target)` smoothly centers the target vertically, even if it is already visible, and waits for scrolling to stop without moving the pointer. Pass `{ block: 'start' }` to frame a section's beginning or `{ block: 'end' }` to frame its ending. The default is `'center'`. The available scroll range can limit alignment near a page or panel boundary. A sticky header can cover a start-aligned heading. Set `scroll-margin-top` on the heading when you control the page. Use `scroll` to show a result or before clicking a target clipped by a scrollable panel or covered by a sticky header. Wait for a dialog or toast to close instead.
+
+A layout change after the smooth scroll settles can require an immediate adjustment. If the page keeps moving or replacing the target during these adjustments, `scroll()` stops with `FLOW_TARGET_MOVED`.
 
 Centering can leave a target partly visible or covered, for example by a sticky bar taller than half the height of the viewport or its scrolling panel. It cannot reveal content hidden by `overflow: clip`. `click` fails with `FLOW_TARGET_OBSCURED` if the target is still covered when it presses.
 
 ### Timing and limits
+
+The recording summary includes `startedAt`, the first frame's timestamp in epoch milliseconds. Call `mark('Settings opened')` in a flow to save a chapter or editing point. The summary's `marks` array contains `{ name, at }` entries in call order, with `at` in seconds from the first frame. Repeated names are kept. Marks close when a synchronous flow returns or throws, when Traceframe observes an asynchronous flow's promise settle, or when the take is cancelled.
 
 `--ready-timeout` (default: 30 seconds) sets Playwright's default timeout during initial navigation and `ready`, for operations that accept a timeout. It does not set a deadline for the whole hook.
 
@@ -168,15 +173,18 @@ export default async function ({ page, click, say }) {
 | --- | --- |
 | `during` | A function to run while the line is spoken, such as `() => click(open)`. Pass it as the second argument or as `{ during }`. `say()` returns when both are done, and rejects as soon as it fails; a line still being spoken is then left out. Lines are spoken one at a time, so a `say()` inside it is spoken after this line. |
 | `click`, `on` | Click a locator as the line says `on`: the first match of that word or words, ignoring case. `duration` and `dwell` work as for `click()`. |
+| `captionText` | Display different text while speaking the original line, for example `say('sixty-three cents', { captionText: '$0.63' })`. Word-synced clicks still match the spoken text. |
 | `caption` | `'top'` or `'bottom'`, to fix where this line's caption goes. |
 
 Phonon gives no word timings, so Traceframe estimates where the word starts (within about 0.15 seconds in tests) and presses as it is said. If the pointer needs longer to reach the target than the line takes to reach the word, the line starts that much later.
 
-Phonon reads numbers and common abbreviations; if it says a name wrongly, spell it the way it sounds. Speech counts toward the flow timeout. The first narrated take downloads the 65 MB model into `~/.cache/traceframe` (`$XDG_CACHE_HOME/traceframe` when set); later takes need no network. `phonon-tts` is MIT or Apache-2.0, and the model is Apache-2.0.
+Phonon reads numbers and common abbreviations; if it mispronounces a name, spell it the way it sounds in the spoken line and use `captionText` for the correct spelling. Speech counts toward the flow timeout. The first narrated take downloads the 65 MB model into `~/.cache/traceframe` (`$XDG_CACHE_HOME/traceframe` when set); later takes need no network. `phonon-tts` is MIT or Apache-2.0, and the model is Apache-2.0.
 
 Each caption shows while its line is spoken, in the [recording guide's caption style](docs/recording-flows.md#add-captions-and-reading-time). It sits at the bottom, unless there it would cover the element the pointer is using or heading for, or the moving pointer, and the top would cover less. It cannot see what appears on its own, such as a toast; use `caption: 'top'` for that line. A long line gets smaller type; one too long to fit even then stops the recording with `INVALID_FLOW`. To turn captions off, export `voice = { captions: false }`.
 
-With `recordPage`, pass `voice: true` or `voice: { captions: false }`; voice uses Playwright's Chromium, or `CHROME_PATH` when set. The summary includes `lineCount`, and `audio: true` once a line was spoken.
+With `recordPage`, pass `voice: true` or `voice: { captions: false }`. Voice uses Playwright's Chromium, or `CHROME_PATH` when set.
+
+With voice enabled, the CLI, `record()` and `recordPage()` include `lineCount` and a `lines` array in their recording summaries. The entries are in spoken order. Each contains `{ text, start, end, overrun }` and the supplied `captionText` when present. Start and end are seconds from the first video frame and cover the synthesized audio, excluding the trailing pause. If a `during` action finishes after its line, `overrun` gives the extra seconds and Traceframe writes a warning to stderr. Otherwise `overrun` is zero. The summary includes `audio: true` once a line was spoken.
 
 With [`audio`](#add-audio) as well, such as the page's own sound, the narration plays over it. While each line is spoken, the audio is turned down just enough to sit 18 dB below the voice, and stays down between lines less than a second apart. Audio already that quiet is left as it is, and audio is never turned up.
 
@@ -222,11 +230,13 @@ await recordPage({
 })
 ```
 
-The callback receives the same `page`, `signal` and six helpers as a flow file. It can close over your script's locators and state. See the [runnable existing-page example](examples/existing-page.mjs); in a clone, run `node examples/existing-page.mjs` to save `.traceframe/existing-page.mp4` using synthetic local content.
+The callback receives the same `page`, `signal` and helpers as a flow file. It can close over your script's locators and state. See the [runnable existing-page example](examples/existing-page.mjs); in a clone, run `node examples/existing-page.mjs` to save `.traceframe/existing-page.mp4` using synthetic local content.
 
 Use Playwright 1.64.1 with Chromium, a fixed viewport, 100% browser zoom and an unscaled page. Traceframe checks the page's inner dimensions and visual viewport before starting capture, rejecting unsupported geometry with `CAPTURE_SIZE_MISMATCH`. `recordPage` keeps the page, context and browser open on success, failure and cancellation. It does not navigate, resize, run a `ready` hook, or change page timeouts. Your script owns setup and shutdown. The CLI and `record` continue to create and close their own browser.
 
 `page` and a function `flow` are required. `output`, `audio`, `postRoll`, `flowTimeout`, `runDirectory` and `signal` have the same meaning as in `record`, and the return value is the same recording summary. Set `initialPointer: { x, y }` to choose the starting cursor position, and `voice: true` to narrate with `say()`. The page's viewport determines the dimensions; `scale` defaults to 1 and accepts 1 or 2, and `fps` defaults to 30 and accepts 30 or 60. Use these explicit settings instead of a preset. Browser setup options such as `url`, `browser`, `gpu`, `storageState`, viewport dimensions and `readyTimeout` are rejected.
+
+To enable GPU rendering on a browser you launch, import `chromiumGpuArgs` from `traceframe` and pass `args: chromiumGpuArgs()` to `chromium.launch` or `chromium.launchPersistentContext`. Use `chromiumGpuArgs('off')` for software rendering. Combine the returned flags with any window or scale arguments your page needs. Before the first frame, `recordPage` checks the running browser and reports `graphics` in the result. If the check is unavailable, recording continues on the same browser with `fallbackReason: 'graphics-check-unavailable'`.
 
 Traceframe moves the caller's pointer only after validating the first frame. To show the starting hover state from frame 0, move the page's mouse to your chosen `initialPointer` before calling `recordPage`.
 
@@ -236,7 +246,7 @@ If the page uses DOM fullscreen, such as a video player's fullscreen button, Chr
 
 Keep the viewport, zoom and visual scale fixed and the page open until `recordPage` settles. Page geometry is checked at startup. During the take, a frame whose size differs from the first stops recording with `CAPTURE_SIZE_CHANGED`. Only that page is recorded; a tab closed during a take may lose its capture. Use the page exclusively for recording: concurrent screencasts, context `recordVideo` and tracing with screenshots can change frame dimensions or supply stale frames. A size check cannot detect every conflict. Overlapping `recordPage` calls on the same page reject with `PAGE_RECORDING_ACTIVE`.
 
-Await every helper. Helpers observe cancellation before further pointer or scroll actions, and release a mouse button that was already pressed; an already-issued action may still complete. Arbitrary callback code must cooperate with `signal`, including passing it to supported Playwright operations. A flow timeout does not forcibly terminate that code. Sequential takes are supported after a successful screencast stop, including ordinary flow failures and cooperative cancellation. Startup or stop failures may need a new page or context; Traceframe leaves that recovery to the caller and does not stop a pre-existing caller screencast.
+Await each asynchronous helper. The `mark()` helper is synchronous. Helpers observe cancellation before further pointer or scroll actions, and release a mouse button that was already pressed; an already-issued action may still complete. Arbitrary callback code must cooperate with `signal`, including passing it to supported Playwright operations. A flow timeout does not forcibly terminate that code. Sequential takes are supported after a successful screencast stop, including ordinary flow failures and cooperative cancellation. Startup or stop failures may need a new page or context; Traceframe leaves that recovery to the caller and does not stop a pre-existing caller screencast.
 
 Traceframe removes its temporary capture unless `runDirectory` is supplied. For extension pages, use full Chromium; the headless shell alone does not load extensions. This path was checked on Linux with Playwright 1.64.1 and its bundled full Chromium using a synthetic extension.
 
@@ -308,17 +318,17 @@ For video-heavy flows, see [checking video playback](docs/recording-flows.md#che
 
 ### GPU rendering
 
-By default, Traceframe tries hardware rendering (`--gpu auto`, or `gpu: 'auto'` in the API). Before navigation, it checks Chromium's compositing status and renderer. If acceleration is unavailable or the GPU browser fails to start, it closes that attempt and uses software rendering instead. Navigation, `ready` and the flow run only on the selected browser; a later recording failure is not retried. Use `--gpu off` (`gpu: 'off'`) to render in software without trying the GPU.
+By default, the CLI and `record()` try hardware rendering (`--gpu auto` or `gpu: 'auto'`). Before navigation, it checks Chromium's compositing status and renderer. If acceleration is unavailable or the GPU browser fails to start, it closes that attempt and uses software rendering instead. Navigation, `ready` and the flow run only on the selected browser; a later recording failure is not retried. Use `--gpu off` (`gpu: 'off'`) to render in software without trying the GPU.
 
-Auto mode uses ANGLE's EGL backend on Linux and Chromium's platform backend elsewhere (Metal on the tested Mac). GPU access and driver support depend on the environment. These launch configurations were tested on Linux Intel/Mesa, Linux NVIDIA and Apple M3 Pro; Windows hardware acceleration has not been validated.
+Auto mode uses ANGLE's EGL backend on Linux and Chromium's platform backend elsewhere (Metal on the tested Mac). GPU access and driver support depend on the environment. These launch configurations were tested on Linux Intel/Mesa, Linux NVIDIA, Apple M3 Pro, and Windows with both NVIDIA GeForce RTX 3050 and Intel Arc graphics using Direct3D 11.
 
-The JSON result includes `graphics`. When hardware rendering was verified, `hardwareAccelerated` is `true` and `renderer` names the GPU. Otherwise `hardwareAccelerated` is `false`; after a failed GPU attempt, `fallbackReason` is `software-rendering` (the GPU browser drew in software), `gpu-device-unavailable` (the same, but on Linux no `/dev/dri/renderD*` device exists or the account cannot open one), `graphics-check-unavailable` (Chromium did not report its graphics status) or `gpu-launch-failed`. These describe the startup check, not GPU utilization or a guarantee of smooth playback or correct drawing. If a recording shows black or garbled areas, record again with `--gpu off`.
+Both recording APIs include `graphics` in the result. When Chromium confirms hardware rendering, `hardwareAccelerated` is `true` and `renderer` names the GPU. Otherwise `hardwareAccelerated` is `false`. The graphics check reports `fallbackReason` as `software-rendering` when Chromium draws in software, `gpu-device-unavailable` when a managed Linux browser draws in software with no accessible `/dev/dri/renderD*` device, or `graphics-check-unavailable` when Chromium's graphics status is unavailable. A managed launch can also report `gpu-launch-failed`. The check runs before capture. If the recording shows black or garbled areas, try software rendering with `--gpu off` or launch the caller's browser with `chromiumGpuArgs('off')`.
 
 Traceframe does not change GPU drivers or permissions. On Linux, Chromium usually needs to open the GPU device (`/dev/dri/renderD*`), which the `render` group allows. That access is often missing over SSH, in services and in containers, so auto mode falls back to software and reports `gpu-device-unavailable`. An administrator can add the account to the group with `sudo usermod -aG render <user>`. New login sessions and restarted system services get the group, but running programs and anything they start keep their old groups. That includes `systemd --user` services: restarting one is not enough, so restart their manager with `sudo systemctl restart user@<uid>.service`, which stops everything else that manager runs, or restart the machine. To use the group right away for a single command, run it as `sg render -c '<command>'`. In Docker, pass the device with `--device` and, for a non-root user, its group ID with `--group-add`.
 
 On a Linux laptop with Intel and NVIDIA GPUs, auto mode can pick the Intel one; `graphics.renderer` names the GPU used. To use the faster NVIDIA GPU, install NVIDIA's EGL library for the installed driver if it is missing (on Ubuntu, `libnvidia-gl-<driver version>`) and run Traceframe with `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json`.
 
-With GPU rendering on macOS, Chromium can also decode video on the GPU: on the tested Mac, a 4K60 video took about 1.4 fewer processor cores, though no more pictures were recorded. Elsewhere video decoding stays in software, because headless Chromium on Linux cannot use GPU-decoded video and Windows has not been tested. JPEG capture and final MP4 encoding still use the CPU; GPU rendering is not hardware video encoding. Smoother capture can store more frames and increase temporary storage and export time. For `recordPage`, configure and check the caller's browser yourself; its result has no `graphics`.
+With GPU rendering on macOS, Chromium can also decode video on the GPU: on the tested Mac, a 4K60 video took about 1.4 fewer processor cores, though no more pictures were recorded. Traceframe's launch flags keep video decoding in software on Linux and Windows. Headless Chromium on Linux cannot use GPU-decoded video. Hardware video decoding on Windows is untested. JPEG capture and final MP4 encoding still use the CPU; GPU rendering is not hardware video encoding. Smoother capture can store more frames and increase temporary storage and export time.
 
 GPU rendering matters most for video-heavy pages. In full-screen 4K60 video tests at 3024 × 1964, it recorded several times more distinct pictures per second than software rendering. With spare CPU, a local 4K60 test video reached about 60 pictures per second, while YouTube's player settled at about 45; Chromium's screencast has no setting to raise that. On slower machines, video decoding and Chromium's JPEG capture compete for the CPU. Full Chromium, which extensions need, captured noticeably fewer pictures than the default headless shell on Linux, so use the default shell unless the flow needs extensions.
 

@@ -12,8 +12,10 @@ import { runCommand } from '../src/ffmpeg.mjs'
 const viewport = { width: 640, height: 360 }
 const PAGE = '<body style="margin: 0; background: #fff"><button style="position: absolute; left: 280px; top: 120px; width: 80px; height: 40px">Save</button>'
 const flowSource = (voice) => `export const voice = ${voice}
-export default async function ({ page, say }) {
+export default async function ({ page, say, mark }) {
+  mark('intro')
   await say('This page has one button.')
+  mark('save')
   await say('Now press Save to finish.', { click: page.getByRole('button', { name: 'Save' }), on: 'Save' })
 }
 `
@@ -61,6 +63,13 @@ test('narrates a take, presses as the word is said, and captions each line', asy
   // Both captions are drawn at the bottom, out of the button's way, while their lines are spoken.
   const windows = [...filter.matchAll(/\[caption\d\]overlay=[^;]*between\(t,([\d.]+),([\d.]+)\)/g)].map((match) => [Number(match[1]), Number(match[2])])
   assert.equal(windows.length, 2)
+  assert.deepEqual(summary.lines.map(line => line.text), ['This page has one button.', 'Now press Save to finish.'])
+  assert.deepEqual(summary.marks.map(mark => mark.name), ['intro', 'save'])
+  for (const [i, line] of summary.lines.entries()) {
+    assert.ok(Math.abs(line.start - windows[i][0]) < 0.001 && Math.abs(line.end - windows[i][1]) < 0.001)
+    assert.equal(line.overrun, 0)
+    assert.ok(summary.marks[i].at <= line.start + 0.002 && line.end <= summary.duration)
+  }
   const bottom = { x: viewport.width / 2, y: viewport.height - 40 }
   assert.ok(await grayAt(summary.output, (windows[0][0] + windows[0][1]) / 2, bottom) < 60)
   assert.ok(await grayAt(summary.output, windows[1][1] + 0.2, bottom) > 200)
@@ -104,6 +113,7 @@ test('mixes the narration over audio, which is turned down while a line is spoke
   assert.equal(summary.lineCount, 2)
   assert.equal(summary.audio, true)
   assert.ok(startedAt > 0)
+  assert.equal(summary.startedAt, startedAt)
 
   const lines = [...filter.matchAll(/\[caption\d\]overlay=[^;]*between\(t,([\d.]+),([\d.]+)\)/g)].map((match) => [Number(match[1]), Number(match[2])])
   const pcm = join(directory, 'hum.pcm')

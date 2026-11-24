@@ -67,6 +67,46 @@ test('aborting while waiting for a target prevents subsequent scrolling', { time
   })
 })
 
+for (const phase of ['scrollend', 'instant']) {
+  test(`a suspended iframe respects the action timeout and abort during ${phase}`, { timeout: 20_000 }, async () => {
+    for (const cancel of [true, false]) {
+      await withPage('<article><iframe srcdoc="<section style=\'margin:1000px 0\'>Result</section>"></iframe></article>', async ({ page, controller, api }) => {
+        page.setDefaultTimeout(cancel ? 0 : 1200)
+        const target = page.frameLocator('iframe').locator('section')
+        await target.evaluate((node, phase) => {
+          const wrapper = frameElement.parentElement
+          const hide = () => { wrapper.style.contentVisibility = 'hidden' }
+          if (phase === 'scrollend') document.addEventListener('scrollend', hide, { once: true })
+          const scroll = node.scrollIntoView
+          node.scrollIntoView = function (options) {
+            wrapper.dataset.scrolls = Number(wrapper.dataset.scrolls || 0) + 1
+            const result = scroll.call(this, options)
+            if (phase === 'instant' && options.behavior === 'instant') hide()
+            return result
+          }
+        }, phase)
+        const reason = new Error('cancel suspended scroll')
+        const outcome = api.scroll(target).catch(error => error)
+        await page.locator('article[style*="hidden"]').waitFor({ state: 'attached', timeout: 4000 })
+        if (cancel) controller.abort(reason)
+        let timer
+        try {
+          const result = await Promise.race([outcome, new Promise(resolve => { timer = setTimeout(resolve, 3500) })])
+          if (cancel) assert.equal(result, reason)
+          else assert.ok(['FLOW_TARGET_MOVED', 'FLOW_TARGET_OUTSIDE_VIEWPORT'].includes(result?.code), String(result))
+        } finally {
+          clearTimeout(timer)
+          const wrapper = page.locator('article')
+          const scrolls = await wrapper.getAttribute('data-scrolls')
+          await wrapper.evaluate(node => { node.style.contentVisibility = 'visible' })
+          await outcome
+          assert.equal(await wrapper.getAttribute('data-scrolls'), scrolls)
+        }
+      })
+    }
+  })
+}
+
 test('aborting hover while its target is replaced prevents later fulfillment', { timeout: 15_000 }, async () => {
   await withPage('<button style="position:absolute;left:100px;top:80px;width:100px;height:40px">Save</button>', async ({ page, controller, api }) => {
     page.setDefaultTimeout(0)

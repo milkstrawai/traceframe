@@ -1,13 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { easeOutCubic } from '../src/easing.mjs'
 import { createJpegCapture } from '../src/jpeg-capture.mjs'
 import { probeFfmpeg, runCommand } from '../src/ffmpeg.mjs'
-import { buildFilterScript, renderVideo } from '../src/render.mjs'
+import { renderVideo } from '../src/render.mjs'
 
 test('stationary overlays preserve sparse image changes and post-roll at both scales and frame rates', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'traceframe-stationary-'))
@@ -142,10 +141,12 @@ test('an empty or sub-frame take contains at least one output frame', async () =
     for (const fps of [30, 60]) {
       const capture = createJpegCapture(rawPath, { width: 8, height: 8, fps, onError: assert.fail })
       await capture.append({ data, timestamp: 1000 }); await capture.stop(1000)
-      for (const end of [-0.000359, 0, 0.0005]) {
+      const pointer = { x: 0, y: 0 }
+      const move = { at: 0, duration: 1 / fps, from: pointer, to: { x: 4, y: 4 } }
+      for (const [end, moves] of [[-0.000359, []], [0, []], [0.0005, []], [0.0005, [move]]]) {
         const output = join(directory, 'output.mp4')
-        const duration = await renderVideo({ rawPath, directory, ffmpeg,
-          trace: { initialPointer: { x: 0, y: 0 }, clicks: [], moves: [], end },
+        const duration = await renderVideo({ rawPath, directory, ffmpeg, signal: AbortSignal.timeout(10_000),
+          trace: { initialPointer: pointer, clicks: [], moves, end },
           config: { video: { width: 8, height: 8, fps }, scale: 1, postRoll: 0, output },
         })
         assert.ok(duration >= 1 / fps - 0.000001 && duration <= 2 / fps + 0.000001)
@@ -154,32 +155,55 @@ test('an empty or sub-frame take contains at least one output frame', async () =
   } finally { await rm(directory, { recursive: true, force: true }) }
 })
 
-test('a long static gap does not buffer a converted image for every output frame', { skip: process.platform !== 'linux', timeout: 30_000 }, async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'traceframe-sparse-memory-'))
-  let child, timer
-  t.after(() => child?.kill('SIGKILL'))
-  try {
-    const image = join(directory, 'frame.jpg'), rawPath = join(directory, 'capture.mkv'), graph = join(directory, 'render.filter')
-    await runCommand('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=white:s=640x480', '-frames:v', '1', image])
-    const capture = createJpegCapture(rawPath, { width: 640, height: 480, fps: 60, onError: assert.fail })
-    await capture.append({ data: await readFile(image), timestamp: 1000 })
-    await capture.stop(61000)
-    const ffmpeg = await probeFfmpeg()
-    await writeFile(graph, buildFilterScript({ trace: { initialPointer: { x: 20, y: 20 }, moves: [{ at: 0.1, duration: 0.5, from: { x: 20, y: 20 }, to: { x: 300, y: 200 } }], clicks: [] }, scale: 1, fps: 60, overlayEofAction: ffmpeg.overlayEofAction }))
-    child = spawn('ffmpeg', ['-v', 'error', '-i', rawPath, '-loop', '1', '-framerate', '60', '-i', join(import.meta.dirname, '../src/assets/cursor-1x.png'),
-      ffmpeg.filterComplexFileOption, graph, '-map', '[final]', '-t', '60', '-c:v', 'libx264', '-threads', '2', '-preset', 'fast', '-f', 'null', '-'], { stdio: ['ignore', 'ignore', 'pipe'] })
-    let peak = 0, exceeded = false, stderr = ''
-    child.stderr.on('data', data => { stderr += data })
-    // Stop a regression before it consumes gigabytes. RSS includes FFmpeg's
-    // decoder and encoder; 512 MiB leaves ample room for this small fixture.
-    timer = setInterval(async () => {
-      const status = await readFile(`/proc/${child.pid}/status`, 'utf8').catch(() => '')
-      peak = Math.max(peak, Number(status.match(/^VmRSS:\s+(\d+)/m)?.[1] ?? 0) * 1024)
-      if (peak > 512 * 1024 * 1024) { exceeded = true; child.kill('SIGKILL') }
-    }, 25)
-    const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve) })
-    assert.equal(exceeded, false, `Sparse rendering exceeded 512 MiB (${Math.round(peak / 1024 / 1024)} MiB sampled).`)
-    assert.equal(code, 0, stderr)
-    assert.ok(peak > 0, 'FFmpeg memory must be sampled')
-  } finally { clearInterval(timer); child?.kill('SIGKILL'); await rm(directory, { recursive: true, force: true }) }
+const memoryTest = { skip: process.platform !== 'linux', timeout: 30_000 }
+const initialPointer = { x: 20, y: 20 }
+
+test('a long static gap does not buffer a converted image for every output frame', memoryTest, async (t) => {
+  const move = { at: 0.1, duration: 0.5, from: initialPointer, to: { x: 300, y: 200 } }
+  await checkRenderMemory(t, { end: 60, moves: [move], clicks: [], burstStarts: [] })
 })
+
+test('render memory stays bounded across a long hold followed by clicks', memoryTest, async (t) => {
+  const clicks = [21.2, 24.3, 27.4, 31.5].map(at => ({ at, point: { x: 100, y: 100 } }))
+  await checkRenderMemory(t, { end: 33, moves: [], clicks, burstStarts: [20, 25, 32] })
+})
+
+async function checkRenderMemory(t, { end, moves, clicks, burstStarts }) {
+  const directory = await mkdtemp(join(tmpdir(), 'traceframe-sparse-memory-'))
+  const controller = new AbortController()
+  let timer, peak = 0
+  try {
+    const image = join(directory, 'frame.jpg'), rawPath = join(directory, 'capture.mkv')
+    const video = { width: 640, height: 360, fps: 60 }
+    await runCommand('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=white:s=640x360', '-frames:v', '1', image])
+    const data = await readFile(image)
+    const capture = createJpegCapture(rawPath, { ...video, onError: assert.fail })
+    await capture.append({ data, timestamp: 0 })
+    for (const start of burstStarts) {
+      for (let frame = 0; frame < 32; frame++) await capture.append({ data, timestamp: 1000 * (start + frame / video.fps) })
+    }
+    await capture.stop(end * 1000)
+
+    const ffmpeg = await probeFfmpeg()
+    // Sample the real renderer and stop a regression before it fills the host.
+    timer = setInterval(async () => {
+      const children = await readFile(`/proc/self/task/${process.pid}/children`, 'utf8')
+      for (const pid of children.match(/\d+/g) ?? []) {
+        const status = await readFile(`/proc/${pid}/status`, 'utf8').catch(() => '')
+        if (!/^Name:\s+ffmpeg$/m.test(status)) continue
+        peak = Math.max(peak, Number(status.match(/^VmHWM:\s+(\d+)/m)?.[1] ?? 0) / 1024)
+        if (peak > 512) controller.abort()
+      }
+    }, 25)
+    const duration = await renderVideo({ rawPath, directory, ffmpeg, signal: AbortSignal.any([t.signal, controller.signal]),
+      trace: { initialPointer, moves, clicks, end },
+      config: { video, scale: 1, postRoll: 0, output: join(directory, 'output.mp4') },
+    })
+    assert.equal(duration, end)
+    assert.ok(peak > 0, 'FFmpeg memory must be sampled')
+  } finally {
+    clearInterval(timer)
+    await rm(directory, { recursive: true, force: true })
+    assert.ok(peak <= 512, `Sparse rendering exceeded 512 MiB (${Math.round(peak)} MiB sampled).`)
+  }
+}

@@ -1,5 +1,5 @@
 import { rename, rm, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 import { runFiles } from './config.mjs'
@@ -26,10 +26,11 @@ export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, s
   }
   const filterPath = runFiles(directory).filter
   const duck = audio && narration ? await duckUnderVoice(audio, narration, signal) : []
-  await writeFile(filterPath, buildFilterScript({ trace, scale: config.scale, fps, audio, narration, duck, captions, overlayEofAction: ffmpeg.overlayEofAction }))
+  const { captureGraph, script } = buildRenderFilters({ rawPath, trace, scale: config.scale, fps, audio, narration, duck, captions, overlayEofAction: ffmpeg.overlayEofAction })
+  await writeFile(filterPath, script)
   const outputTemp = join(dirname(config.output), `.traceframe-${randomUUID()}.tmp.mp4`)
   const inputs = {
-    capture: ['-i', rawPath],
+    capture: captureGraph ? ['-f', 'lavfi', '-i', captureGraph] : ['-i', rawPath],
     cursor: ['-loop', '1', '-framerate', String(fps), '-i', join(ASSETS, `cursor-${config.scale}x.png`)],
     pulse: ['-loop', '1', '-framerate', String(fps), '-t', String(CLICK.duration + 1 / fps), '-i', join(ASSETS, `click-pulse-${config.scale}x.png`)],
     audio: ['-i', audio?.path],
@@ -43,6 +44,12 @@ export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, s
     '-map', '[final]',
   ]
   if (audio || narration) args.push('-map', '[finalAudio]', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2')
+  if (captureGraph && ffmpeg.major === 5) {
+    // FFmpeg 5's lavfi input loses the source's chroma sample location.
+    const { stdout } = await runCommand('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=chroma_location', '-of', 'csv=p=0', rawPath], { signal })
+    const location = stdout.trim()
+    if (location && location !== 'unspecified' && location !== 'unknown') args.push('-chroma_sample_location', location)
+  }
   args.push(
     '-t', String(number(outputDuration)),
     '-r', String(fps),
@@ -69,23 +76,26 @@ export async function renderVideo({ rawPath, trace, directory, config, ffmpeg, s
 // Event times are seconds from the first frame of the raw video. Captions ({ path, start, end, x, y }) are images
 // placed in video pixels, drawn over the page and under the click pulses and cursor. Under the narration, `duck` turns
 // the audio down by `cut` dB from `start` to `end`: [{ start, end, cut }].
-export function buildFilterScript({ trace, scale, fps, audio, narration, duck = [], captions = [], overlayEofAction }) {
+export function buildRenderFilters({ rawPath, trace, scale, fps, audio, narration, duck = [], captions = [], overlayEofAction }) {
   const { clicks, moves } = trace
   const input = inputIndices(trace, audio, narration, captions)
   const animatedOverlays = clicks.length > 0 || moves.length > 0 || captions.length > 0
-  // Repeat the last picture and resample to the output rate. The padding also covers a sub-frame take or final rounding.
-  // Animated overlays need every output tick, even on a static page, so the cadence comes first. With stationary
-  // overlays, it comes last, so they are composited before identical frames are duplicated.
-  const cadence = `tpad=stop_mode=clone:stop_duration=1,fps=${fps}`
+  // Normalize Chrome's full-range JPEGs before duplicating frames. Padding covers sub-frame takes and final rounding.
+  const normalize = 'scale=out_range=tv,format=yuv420p,format=yuv444p'
+  const pad = 'tpad=stop_mode=clone:stop_duration=1'
+  // Let the compositor pull one frame per tick. Expanding a long static hold inside its graph can queue
+  // gigabytes of writable copies downstream. A stationary cursor can still be drawn before duplication.
+  // FFmpeg 7 clears the frame rate in setpts. Pad first so a one-frame take survives resampling.
+  const captureGraph = animatedOverlays
+    ? `movie=filename=${quoteFilterValue(quoteFilterValue('file:' + resolve(rawPath)))},${normalize},${pad},setpts=PTS-STARTPTS,fps=${fps}`
+    : undefined
   // Pass mode avoids waiting on looping image inputs; FFmpeg 7 needs repeat for padding.
   // yuv444 places overlays on whole pixels rather than snapping them to even pixels.
   const overlay = `eof_action=${overlayEofAction}:format=yuv444`
-  // Chrome JPEGs are full range; normalize before compositing limited-range overlays.
-  // Convert to the overlay format before duplicating frames. Converting afterward
-  // can queue a full-size buffer for every repeated frame in a long static gap.
   // Captions go over the page, from [page0] to [video0], before the click pulses and cursor.
   const page = (index) => (index < captions.length ? `page${index}` : 'video0')
-  const filters = [`[${input.capture}:v]scale=out_range=tv,format=yuv420p,format=yuv444p,setpts=PTS-STARTPTS${animatedOverlays ? ',' + cadence : ''}[${page(0)}]`]
+  const pageFilter = animatedOverlays ? 'null' : `${normalize},setpts=PTS-STARTPTS`
+  const filters = [`[${input.capture}:v]${pageFilter}[${page(0)}]`]
   captions.forEach((caption, index) => {
     const start = number(caption.start)
     filters.push(
@@ -112,9 +122,15 @@ export function buildFilterScript({ trace, scale, fps, audio, narration, duck = 
     const y = `${coordinate(move.from.y, CURSOR_HOTSPOT.y)}+${number((move.to.y - move.from.y) * scale)}*${eased}`
     filters.push(`[cursorVideo${index}][cursor${index + 1}]overlay=x='${x}':y='${y}':${overlay}:enable='${enable}'[cursorVideo${index + 1}]`)
   })
-  filters.push(`[cursorVideo${moves.length}]colorspace=ispace=bt470bg:iprimaries=bt709:itrc=bt709:all=bt709:format=yuv420p${animatedOverlays ? '' : ',' + cadence}[final]`)
+  const cadence = animatedOverlays ? '' : `,${pad},fps=${fps}`
+  filters.push(`[cursorVideo${moves.length}]colorspace=ispace=bt470bg:iprimaries=bt709:itrc=bt709:all=bt709:format=yuv420p${cadence}[final]`)
   if (audio || narration) filters.push(...audioFilters(input, audio, narration, duck))
-  return filters.join(';')
+  return { captureGraph, script: filters.join(';') }
+}
+
+// The filter graph and the movie filter each consume one level of FFmpeg quoting.
+function quoteFilterValue(value) {
+  return `'${value.replaceAll("'", "'\\''")}'`
 }
 
 // The audio at its offset and the narration from the first frame, mixed when there are both, as [finalAudio].
@@ -200,8 +216,9 @@ function clickFilter(click, index, scale, overlay) {
   const start = number(click.at)
   const end = number(start + CLICK.duration)
   const growth = `(${CLICK.scaleStart}+${CLICK.scaleEnd - CLICK.scaleStart}*clip((t-${start})/${CLICK.duration},0,1))`
+  // FFmpeg 9.1's fade requires fixed-size input. Fade the pulse before animating its size.
   return [
-    `[pulse${index}]setpts=PTS-STARTPTS+${start}/TB,scale=w='iw*${growth}':h='ih*${growth}':eval=frame,fade=t=out:st=${start}:d=${CLICK.duration}:alpha=1[click${index}]`,
+    `[pulse${index}]setpts=PTS-STARTPTS+${start}/TB,fade=t=out:st=${start}:d=${CLICK.duration}:alpha=1,scale=w='iw*${growth}':h='ih*${growth}':eval=frame[click${index}]`,
     `[video${index}][click${index}]overlay=x='${number(click.point.x * scale)}-w/2':y='${number(click.point.y * scale)}-h/2':${overlay}:enable='between(t,${start},${end})'[video${index + 1}]`,
   ]
 }

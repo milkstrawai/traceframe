@@ -20,8 +20,16 @@ export async function probeFfmpeg({ audio = false } = {}) {
   if (audio && !/^\s*A\S*\s+aac\s/m.test(codecs.stdout)) {
     throw new TraceframeError('System FFmpeg does not provide the AAC encoder required for audio.', { code: 'FFMPEG_UNSUPPORTED' })
   }
-  await runCommand('ffprobe', ['-version'])
+  const [devices, filters] = await Promise.all([
+    runCommand('ffmpeg', ['-hide_banner', '-devices']),
+    runCommand('ffmpeg', ['-hide_banner', '-filters']),
+    runCommand('ffprobe', ['-version']),
+  ])
+  if (!/^\s*D\s+lavfi\s/m.test(devices.stdout) || !/^\s*\S+\s+movie\s/m.test(filters.stdout)) {
+    throw new TraceframeError('System FFmpeg needs the lavfi input device and the movie filter to render animated overlays.', { code: 'FFMPEG_UNSUPPORTED' })
+  }
   return {
+    major,
     filterComplexFileOption: filterComplexFileOption(major),
     // FFmpeg 7's pass mode cuts off padded main-video frames at the original EOF.
     overlayEofAction: major === 7 ? 'repeat' : 'pass',
