@@ -712,7 +712,7 @@ test('keeps a heading aligned while a wrapper grows along a non-scrolling axis',
   for (const [overflow, block] of [['clip', 'center'], ['hidden', 'end'], ['auto', 'center']]) {
     await withPage(`
       <!doctype html><style>* { margin:0; overflow-anchor:none } aside, footer { height:1000px }
-      main { overflow:${overflow} } h2 { height:40px } article { height:80px; width:1200px }</style>
+      main { overflow:${overflow} } h2 { height:40px } article { height:80px; width:100% }</style>
       <aside></aside><main><h2>Result</h2><article></article></main><footer></footer>
     `, async ({ page, api }) => {
       const heading = page.locator('h2')
@@ -722,6 +722,8 @@ test('keeps a heading aligned while a wrapper grows along a non-scrolling axis',
           if (options.behavior === 'instant') {
             const sibling = node.nextElementSibling
             sibling.style.height = `${sibling.offsetHeight + 20}px`
+            // A sibling sliding out and back changes the wrapper's scroll range while its edges stay put.
+            sibling.style.transform = sibling.style.transform ? '' : 'translateX(12px)'
           }
           return scroll.call(this, options)
         }
